@@ -24,6 +24,7 @@ from fsspec import asyn
 from fsspec.callbacks import NoOpCallback
 from fsspec.implementations.http import get_client
 from fsspec.utils import setup_logging, stringify_path
+from google.cloud.storage._experimental.asyncio.async_grpc_client import AsyncGrpcClient
 
 from . import __version__ as version
 from .checkers import get_consistency_checker
@@ -32,6 +33,8 @@ from .inventory_report import InventoryReport
 from .retry import errs, retry_request, validate_response
 from .gcs_adapter import GCSAdapter
 from enum import Enum
+
+from .zonal_adapter import ZonalAdapter
 
 logger = logging.getLogger("gcsfs")
 
@@ -290,15 +293,6 @@ class GCSFileSystem(asyn.AsyncFileSystem):
         NON_HIERARCHICAL = "NON_HIERARCHICAL"
         UNKNOWN = "UNKNOWN"
 
-    bucket_type = BucketType.UNKNOWN
-    _adapter = None
-
-    @classmethod
-    def _get_adapter(cls, **kwargs):
-        if cls._adapter is None:
-            cls._adapter = GCSAdapter(**kwargs)
-        return cls._adapter
-
     def __init__(
         self,
         project=DEFAULT_PROJECT,
@@ -347,15 +341,11 @@ class GCSFileSystem(asyn.AsyncFileSystem):
         self.version_aware = version_aware
         self.experimental_zb_hns_support = experimental_zb_hns_support
         self._storage_layout_cache = {}
+        self.async_grpc_client = None
 
         if self.experimental_zb_hns_support:
-            try:
-                self.bucket_type = self._sync_get_storage_layout(project)
-            except Exception as e:
-                logger.warning(
-                    f"Failed to get storage layout for bucket {project}: {e}"
-                )
-
+            self.async_grpc_client = AsyncGrpcClient().grpc_client
+            print("Async GRPC client initialized")
         if check_connection:
             warnings.warn(
                 "The `check_connection` argument is deprecated and will be removed in a future release.",
@@ -367,8 +357,9 @@ class GCSFileSystem(asyn.AsyncFileSystem):
         )
 
     async def _get_storage_layout(self, bucket):
-        if bucket in self._storage_layout_cache:
-            return self._storage_layout_cache[bucket]
+        if self.experimental_zb_hns_support:
+            if bucket in self._storage_layout_cache:
+                return self._storage_layout_cache[bucket]
 
         try:
             response = await self._call("GET", f"b/{bucket}/storageLayout", json_out=True)
@@ -505,12 +496,6 @@ class GCSFileSystem(asyn.AsyncFileSystem):
     async def _request(
         self, method, path, *args, headers=None, json=None, data=None, **kwargs
     ):
-        if self.bucket_type == self.BucketType.ZONAL_HIERARCHICAL:
-            adapter = self._get_adapter(project=self.project, token=self.credentials.credentials)
-            result = adapter.handle(method, self._format_path(path, args), **kwargs)
-            if result is not None:
-                return result
-
         await self._set_session()
         if hasattr(data, "seek"):
             data.seek(0)
@@ -1920,6 +1905,7 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
         self.key = key
         self.acl = acl
         self.checker = get_consistency_checker(consistency)
+        self.bucket_type = self.gcsfs.BucketType.UNKNOWN
 
         if "a" in self.mode:
             warnings.warn(
@@ -1945,6 +1931,22 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
                 warnings.warn("Setting block size to minimum value, 2**18")
                 self.blocksize = GCS_MIN_BLOCK_SIZE
             self.location = None
+
+        if self.gcsfs.experimental_zb_hns_support:
+            try:
+                self.bucket_type = self.gcsfs._sync_get_storage_layout(bucket)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to get storage layout for bucket {bucket}: {e}"
+                )
+            if self.bucket_type == self.gcsfs.BucketType.ZONAL_HIERARCHICAL:
+                print("Creating ZONAL_HIERARCHICAL adapter")
+                self.gcs_adapter =  self._get_adapter()
+
+    def _get_adapter(self):
+        # return ZonalAdapter.create(self)
+        return asyn.sync(self.gcsfs.loop, ZonalAdapter._create, self)
+
 
     @property
     def details(self):
@@ -2091,6 +2093,12 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
         start, end : None or integers
             if not both None, fetch only given range
         """
+        if self.gcsfs.experimental_zb_hns_support and self.gcs_adapter is not None:
+            try:
+                print("\nDirecting to zonal adapter")
+                return self.gcs_adapter.handle(self.path, start, end)
+            except Exception as e:
+                raise
         try:
             return self.gcsfs.cat_file(self.path, start=start, end=end)
         except RuntimeError as e:
