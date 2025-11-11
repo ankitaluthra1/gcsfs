@@ -35,14 +35,13 @@ gcs_file_types = {
 
 class ExtendedGcsFileSystem(GCSFileSystem):
     """
-    This class will be used when experimental_zb_hns_support is set to true for all bucket types.
+    This class will be used when GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT env variable is set to true.
     ExtendedGcsFileSystem is a subclass of GCSFileSystem that adds new logic for bucket types
     including zonal and hierarchical. For buckets without special properties, it forwards requests
     to the parent class GCSFileSystem for default processing.
     """
 
     def __init__(self, *args, **kwargs):
-        kwargs.pop("experimental_zb_hns_support", None)
         super().__init__(*args, **kwargs)
         self.grpc_client = None
         self.storage_control_client = None

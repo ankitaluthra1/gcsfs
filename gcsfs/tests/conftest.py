@@ -129,6 +129,7 @@ def gcs(gcs_factory, populate=True):
 
 def _cleanup_gcs(gcs, is_real_gcs):
     """Only remove the bucket/contents if we are NOT using the real GCS, logging a warning on failure."""
+    del os.environ["GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT"]
     if is_real_gcs:
         return
     try:
@@ -154,7 +155,8 @@ def extended_gcsfs(gcs_factory, populate=True):
     )
 
     with mock_authentication_manager:
-        extended_gcsfs = gcs_factory(experimental_zb_hns_support=True)
+        os.environ["GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT"] = "true"
+        extended_gcsfs = gcs_factory()
         try:
             # Only create/delete/populate the bucket if we are NOT using the real GCS endpoint
             if not is_real_gcs:
