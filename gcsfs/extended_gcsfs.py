@@ -227,6 +227,3 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             # Explicit cleanup if we created the MRD and it has a close method
             if mrd_created:
                 await mrd.close()
-
-register_implementation("gs", ExtendedGcsFileSystem)
-register_implementation("gcs", ExtendedGcsFileSystem)

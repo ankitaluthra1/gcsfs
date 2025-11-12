@@ -7,10 +7,10 @@ from .core import GCSFileSystem
 from .mapping import GCSMap
 if os.getenv("GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT", "false").lower() in ("true", "1"):
     try:
-        from .extended_gcsfs import ExtendedGcsFileSystem
+        from .extended_gcsfs import ExtendedGcsFileSystem as GCSFileSystem
         print("INFO: gcsfs experimental features enabled via GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT.")
         # Rebind the name GCSFileSystem to the extended version
-        GCSFileSystem = ExtendedGcsFileSystem
+        #GCSFileSystem = ExtendedGcsFileSystem
         # # Explicitly register the extended version, overwriting any default
         # register_implementation("gs", GCSFileSystem, clobber=True)
         # register_implementation("gcs", GCSFileSystem, clobber=True)
