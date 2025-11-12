@@ -4,7 +4,6 @@ from builtins import FileNotFoundError
 from datetime import datetime, timezone
 from itertools import chain
 from unittest import mock
-from unittest.mock import patch
 from urllib.parse import parse_qs, unquote, urlparse
 from uuid import uuid4
 
@@ -19,7 +18,6 @@ import gcsfs.tests.settings
 from gcsfs import __version__ as version
 from gcsfs.core import GCSFileSystem, quote
 from gcsfs.credentials import GoogleCredentials
-from gcsfs.extended_gcsfs import ExtendedGcsFileSystem
 from gcsfs.tests.conftest import a, allfiles, b, csv_files, files, text_files
 from gcsfs.tests.utils import tempdir, tmpfile
 

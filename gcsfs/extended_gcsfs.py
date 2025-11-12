@@ -12,7 +12,6 @@ from gcsfs import __version__ as version
 from gcsfs import zb_hns_utils
 from gcsfs.core import GCSFile, GCSFileSystem
 from gcsfs.zonal_file import ZonalFile
-from fsspec import register_implementation
 
 logger = logging.getLogger("gcsfs")
 
