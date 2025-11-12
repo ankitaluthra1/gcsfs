@@ -12,6 +12,7 @@ from gcsfs import __version__ as version
 from gcsfs import zb_hns_utils
 from gcsfs.core import GCSFile, GCSFileSystem
 from gcsfs.zonal_file import ZonalFile
+from fsspec import register_implementation
 
 logger = logging.getLogger("gcsfs")
 
@@ -226,3 +227,6 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             # Explicit cleanup if we created the MRD and it has a close method
             if mrd_created:
                 await mrd.close()
+
+register_implementation("gs", ExtendedGcsFileSystem)
+register_implementation("gcs", ExtendedGcsFileSystem)
