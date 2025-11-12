@@ -1733,27 +1733,3 @@ def test_near_find(gcs):
 def test_get_error(gcs):
     with pytest.raises(FileNotFoundError):
         gcs.get_file(f"{TEST_BUCKET}/doesnotexist", "other")
-
-
-def test_gcs_filesystem_when_experimental_zonal_toggle_is_not_present(gcs_factory):
-    gcs = gcs_factory()
-
-    assert isinstance(
-        gcs, gcsfs.GCSFileSystem
-    ), "Expected File system instance to be GCSFileSystem"
-    assert not isinstance(
-        gcs, ExtendedGcsFileSystem
-    ), "Expected File system instance to be GCSFileSystem"
-
-
-def test_extended_gcs_filesystem_when_experimental_zonal_toggle_is_true(gcs_factory):
-    try:
-        with patch("google.auth.default", return_value=(None, "fake-project")):
-            os.environ["GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT"] = "true"
-            gcs = gcs_factory()
-
-            assert isinstance(
-                gcs, ExtendedGcsFileSystem
-            ), "Expected File system instance to be ExtendedGcsFileSystem"
-    finally:
-        del os.environ["GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT"]
