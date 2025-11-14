@@ -48,7 +48,7 @@ steps:
       - "--machine-type=e2-medium"
       - "--image-family=debian-11"
       - "--image-project=debian-cloud"
-      - "--service-account=${_SERVICE_ACCOUNT}"
+      - "--service-account=${_ZONAL_VM_SERVICE_ACCOUNT}"
       - "--tags=allow-ssh"
       - "--scopes=https://www.googleapis.com/auth/cloud-platform" # Full access to project APIs
       - "--metadata=enable-oslogin=TRUE"
@@ -100,6 +100,7 @@ steps:
           export GCSFS_HNS_TEST_BUCKET='gcsfs-test-hns-${_SHORT_BUILD_ID}'
 
           export STORAGE_EMULATOR_HOST=https://storage.googleapis.com
+          export GCSFS_TEST_PROJECT=${PROJECT_ID}
           
           echo '--- Running pytest on VM ---'
           pytest -vv -s \
