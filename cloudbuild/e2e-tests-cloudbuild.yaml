@@ -1,0 +1,162 @@
+substitutions:
+  _REGION: "us-central1"
+  _ZONE: "us-central1-a"
+  _SHORT_BUILD_ID: ${BUILD_ID:0:8}
+
+steps:
+  # Step 1: Create a unique standard GCS bucket for the test run.
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: "create-standard-bucket"
+    entrypoint: "gcloud"
+    args:
+      - "storage"
+      - "buckets"
+      - "create"
+      - "gs://gcsfs-test-standard-${_SHORT_BUILD_ID}"
+      - "--project=${PROJECT_ID}"
+      - "--location=${_REGION}"
+    waitFor: ["-"]
+
+  # Step 2: Create a unique HNS-enabled GCS bucket for the test run.
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: "create-hns-bucket"
+    entrypoint: "gcloud"
+    args:
+      - "storage"
+      - "buckets"
+      - "create"
+      - "gs://gcsfs-test-hns-${_SHORT_BUILD_ID}"
+      - "--project=${PROJECT_ID}"
+      - "--location=${_REGION}"
+      - "--enable-hierarchical-namespace"
+      - "--uniform-bucket-level-access"
+    waitFor: ["-"]
+
+  # Step 3: Create a GCE VM to run the tests.
+  # The VM is created in the same zone as the buckets to test rapid storage features.
+  # It's given the 'cloud-platform' scope to allow it to access GCS and other services.
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: "create-vm"
+    entrypoint: "gcloud"
+    args:
+      - "compute"
+      - "instances"
+      - "create"
+      - "gcsfs-test-vm-${_SHORT_BUILD_ID}"
+      - "--project=${PROJECT_ID}"
+      - "--zone=${_ZONE}"
+      - "--machine-type=e2-medium"
+      - "--image-family=debian-11"
+      - "--image-project=debian-cloud"
+      - "--service-account=${_SERVICE_ACCOUNT}"
+      - "--tags=allow-ssh"
+      - "--scopes=https://www.googleapis.com/auth/cloud-platform" # Full access to project APIs
+      - "--metadata=enable-oslogin=TRUE"
+    waitFor: ["-"]
+
+  # Step 4: Run the integration tests inside the newly created VM.
+  # This step uses 'gcloud compute ssh' to execute a remote script.
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: "run-tests-on-vm"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        set -e
+        # Wait for the VM to be fully initialized and SSH to be ready.
+        for i in {1..10}; do
+          if gcloud compute ssh gcsfs-test-vm-${_SHORT_BUILD_ID} --zone=${_ZONE} --internal-ip --quiet --command="whoami"; then
+            break
+          fi
+          echo "Waiting for VM to become available... (attempt $$i/10)"
+          sleep 15
+        done
+
+        # Script to be executed on the VM.
+        # This script installs dependencies, sets environment variables, and runs pytest.
+        VM_SCRIPT="
+          set -e
+          echo '--- Installing git and cloning repository on VM ---'
+          sudo apt-get update
+          sudo apt-get install -y git python3-pip python3-venv
+
+          # Clone the repository and checkout the specific commit from the build trigger.
+          git clone https://github.com/ankitaluthra1/gcsfs.git
+          cd gcsfs
+          git checkout ${COMMIT_SHA}
+
+
+          echo '--- Installing Python and dependencies on VM ---'
+          python3 -m venv env
+          source env/bin/activate
+
+          pip install --upgrade pip
+          # Install testing libraries explicitly, as they are not in setup.py
+          pip install pytest pytest-timeout pytest-asyncio
+          pip install -e .
+
+          echo '--- Preparing test environment on VM ---'
+          export GCSFS_TEST_BUCKET='gcsfs-test-standard-${_SHORT_BUILD_ID}'
+          export GCSFS_HNS_TEST_BUCKET='gcsfs-test-hns-${_SHORT_BUILD_ID}'
+
+          export STORAGE_EMULATOR_HOST=https://storage.googleapis.com
+          
+          echo '--- Running pytest on VM ---'
+          pytest -vv -s \
+          --log-format='%(asctime)s %(levelname)s %(message)s' \
+          --log-date-format='%H:%M:%S' \
+          gcsfs/
+        "
+
+        # Execute the script on the VM via SSH.
+        gcloud compute ssh gcsfs-test-vm-${_SHORT_BUILD_ID} --zone=${_ZONE} --internal-ip --command="$$VM_SCRIPT"
+    waitFor:
+      - "create-vm"
+      - "create-standard-bucket"
+      - "create-hns-bucket"
+
+  # --- Cleanup Steps ---
+
+  # Step 5: Delete the GCE VM.
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: "delete-vm"
+    entrypoint: "gcloud"
+    args:
+      - "compute"
+      - "instances"
+      - "delete"
+      - "gcsfs-test-vm-${_SHORT_BUILD_ID}"
+      - "--zone=${_ZONE}"
+      - "--quiet"
+    waitFor:
+      - "run-tests-on-vm"
+
+  # Step 6: Delete the standard GCS bucket.
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: "delete-standard-bucket"
+    entrypoint: "gcloud"
+    args:
+      [
+        "storage",
+        "rm",
+        "--recursive",
+        "gs://gcsfs-test-standard-${_SHORT_BUILD_ID}",
+      ]
+    waitFor:
+      - "run-tests-on-vm"
+
+  # Step 7: Delete the HNS GCS bucket.
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: "delete-hns-bucket"
+    entrypoint: "gcloud"
+    args:
+      ["storage", "rm", "--recursive", "gs://gcsfs-test-hns-${_SHORT_BUILD_ID}"]
+    waitFor:
+      - "run-tests-on-vm"
+
+timeout: "3600s" # 60 minutes
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  pool:
+    name: "projects/${PROJECT_ID}/locations/us-central1/workerPools/cloud-build-worker-pool"
