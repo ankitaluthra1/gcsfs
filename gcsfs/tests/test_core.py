@@ -1441,8 +1441,7 @@ def test_ls_versioned(gcs_versioned):
     assert versions == {
         entry["name"] for entry in gcs_versioned.ls(dpath, detail=True, versions=True)
     }
-    assert gcs_versioned.ls(TEST_BUCKET, versions=True) == ["gcsfs_test/tmp"]
-
+    assert gcs_versioned.ls(TEST_BUCKET, versions=True) == [f"{TEST_BUCKET}/tmp"]
 
 def test_find_versioned(gcs_versioned):
     with gcs_versioned.open(a, "wb") as wo:

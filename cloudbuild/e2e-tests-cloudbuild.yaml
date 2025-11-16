@@ -101,6 +101,7 @@ steps:
 
           export STORAGE_EMULATOR_HOST=https://storage.googleapis.com
           export GCSFS_TEST_PROJECT=${PROJECT_ID}
+          export GCSFS_TEST_KMS_KEY=projects/${PROJECT_ID}/locations/${_REGION}/keyRings/${_GCSFS_KEY_RING_NAME}/cryptoKeys/${_GCSFS_KEY_NAME}
           
           echo '--- Running pytest on VM ---'
           pytest -vv -s \
