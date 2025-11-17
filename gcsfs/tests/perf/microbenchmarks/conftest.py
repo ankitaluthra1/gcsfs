@@ -1,5 +1,3 @@
-import argparse
-import itertools
 import logging
 import os
 import uuid
@@ -7,19 +5,26 @@ import uuid
 import fsspec
 import pytest
 
-from gcsfs.tests.settings import TEST_BUCKET, TEST_PROJECT
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-# --- Benchmark Parameters ---
-NUM_FILES = [10]  # [10, 100, 1000]
-FILE_SIZES_BYTES = [1024]  # [1024, 1024 * 1024, 10 * 1024 * 1024]  # 1KB, 1MB, 10MB
+# --- Benchmark Configuration from Environment Variables ---
+NUM_FILES = int(os.environ.get("GCSFS_BENCH_NUM_FILES", 1))
+FILE_SIZE_MEGABYTES = int(os.environ.get("GCSFS_BENCH_FILE_SIZE_MB", 1))
+FILE_SIZE_BYTES = FILE_SIZE_MEGABYTES * 1024 * 1024
+
+BUCKET_NAME = os.environ.get("GCSFS_BENCH_BUCKET", "")
+PROJECT_ID = os.environ.get("GCSFS_BENCH_PROJECT", "")
+
+# --- Benchmark Execution Constants ---
+BENCHMARK_ROUNDS = int(os.environ.get("GCSFS_BENCH_ROUNDS", 10))
+BENCHMARK_ITERATIONS = int(os.environ.get("GCSFS_BENCH_ITERATIONS", 1))
+BENCHMARK_WARMUP_ROUNDS = int(os.environ.get("GCSFS_BENCH_WARMUP", 1))
 
 # Create combinations of (num_files, file_size)
-benchmark_params = list(itertools.product(NUM_FILES, FILE_SIZES_BYTES))
+benchmark_params = [(NUM_FILES, FILE_SIZE_BYTES)]
 
 
 def get_gcs_filesystem(project):
@@ -44,10 +49,10 @@ def gcs_read_benchmark_fixture(request):
     """
     num_files, file_size = request.param
     logging.info(
-        f"Setting up read benchmark: {num_files} files, {file_size // 1024}KB each."
+        f"Setting up read benchmark: {num_files} files, {file_size // 1024 // 1024}MB each."
     )
-    gcs = get_gcs_filesystem(TEST_PROJECT)
-    file_paths = [f"{TEST_BUCKET}/{uuid.uuid4()}" for _ in range(num_files)]
+    gcs = get_gcs_filesystem(PROJECT_ID)
+    file_paths = [f"{BUCKET_NAME}/{uuid.uuid4()}" for _ in range(num_files)]
     file_content = os.urandom(file_size)
 
     # Setup: Create the files
@@ -63,56 +68,6 @@ def gcs_read_benchmark_fixture(request):
     gcs.rm(file_paths)
     logging.info("Teardown complete.")
 
-
-def get_benchmark_parser(description):
-    """Creates a common argparse.ArgumentParser for benchmarks."""
-    parser = argparse.ArgumentParser(description=description)
-    parser.add_argument(
-        "--project",
-        type=str,
-        default=TEST_PROJECT,
-        help="The GCS project ID.",
-    )
-    parser.add_argument(
-        "--bucket",
-        type=str,
-        default=TEST_BUCKET,
-        help="The GCS bucket name.",
-    )
-    parser.add_argument(
-        "--num-files",
-        type=int,
-        default=10,
-        help="The number of files to create for the benchmark.",
-    )
-    parser.add_argument(
-        "--file-size-kb",
-        type=int,
-        default=1,
-        help="The size of each file in kilobytes (KB).",
-    )
-    return parser
-
-
-def print_benchmark_summary(benchmark_results):
-    """Prints a formatted summary table for benchmark results."""
-    if not benchmark_results:
-        return
-    print("\n--- Benchmark Summary ---")
-    headers = benchmark_results[0].keys()
-    widths = {
-        header: max(len(str(row[header])) for row in benchmark_results)
-        for header in headers
-    }
-    widths = {h: max(len(h), w) for h, w in widths.items()}
-    header_line = " | ".join(h.ljust(widths[h]) for h in headers)
-    print(header_line)
-    print("-" * len(header_line))
-    for row in benchmark_results:
-        row_line = " | ".join(str(row[h]).ljust(widths[h]) for h in headers)
-        print(row_line)
-
-
 @pytest.fixture(scope="function", params=benchmark_params)
 def gcs_write_benchmark_fixture(request):
     """
@@ -121,10 +76,10 @@ def gcs_write_benchmark_fixture(request):
     """
     num_files, file_size = request.param
     logging.info(
-        f"Setting up write benchmark: {num_files} files, {file_size // 1024}KB each."
+        f"Setting up write benchmark: {num_files} files, {file_size // 1024 // 1024}MB each."
     )
-    gcs = get_gcs_filesystem(TEST_PROJECT)
-    file_paths = [f"{TEST_BUCKET}/{uuid.uuid4()}" for _ in range(num_files)]
+    gcs = get_gcs_filesystem(PROJECT_ID)
+    file_paths = [f"{BUCKET_NAME}/{uuid.uuid4()}" for _ in range(num_files)]
     file_content = os.urandom(file_size)
 
     yield gcs, file_paths, file_content, num_files, file_size
