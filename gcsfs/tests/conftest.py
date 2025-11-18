@@ -181,21 +181,26 @@ def extended_gcsfs(gcs_factory, populate=True):
 def gcs_versioned(gcs_factory):
     gcs = gcs_factory()
     gcs.version_aware = True
+    is_real_gcs = (
+        os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
+    )
     try:
-        try:
-            gcs.rm(gcs.find(TEST_BUCKET, versions=True))
-        except FileNotFoundError:
-            pass
+        if not is_real_gcs:
+            try:
+                gcs.rm(gcs.find(TEST_BUCKET, versions=True))
+            except FileNotFoundError:
+                pass
 
-        try:
-            gcs.mkdir(TEST_BUCKET, enable_versioning=True)
-        except Exception:
-            pass
+            try:
+                gcs.mkdir(TEST_BUCKET, enable_versioning=True)
+            except Exception:
+                pass
         gcs.invalidate_cache()
         yield gcs
     finally:
         try:
-            gcs.rm(gcs.find(TEST_BUCKET, versions=True))
-            gcs.rm(TEST_BUCKET)
+            if not is_real_gcs: 
+                gcs.rm(gcs.find(TEST_BUCKET, versions=True))
+                gcs.rm(TEST_BUCKET)
         except:  # noqa: E722
             pass
