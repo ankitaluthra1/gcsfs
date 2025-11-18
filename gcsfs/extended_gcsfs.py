@@ -7,6 +7,9 @@ from google.api_core import gapic_v1
 from google.api_core.client_info import ClientInfo
 from google.cloud import storage_control_v2
 from google.cloud.storage._experimental.asyncio.async_grpc_client import AsyncGrpcClient
+from google.cloud.storage._experimental.asyncio.async_multi_range_downloader import (
+    AsyncMultiRangeDownloader,
+)
 
 from gcsfs import __version__ as version
 from gcsfs import zb_hns_utils
@@ -213,7 +216,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             if not await self._is_zonal_bucket(bucket):
                 return await super()._cat_file(path, start=start, end=end, **kwargs)
 
-            mrd = await zb_hns_utils.create_mrd(
+            mrd = await AsyncMultiRangeDownloader.create_mrd(
                 self.grpc_client, bucket, object_name, generation
             )
             mrd_created = True
