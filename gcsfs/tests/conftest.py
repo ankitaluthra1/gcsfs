@@ -103,28 +103,33 @@ def gcs_factory(docker_gcs):
 
 @pytest.fixture
 def gcs(gcs_factory, populate=True):
+    is_real_gcs = (
+        os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
+    )
+    print("is_real_gcs", is_real_gcs)
     gcs = gcs_factory()
     try:
-        # ensure we're empty.
-        try:
-            gcs.rm(TEST_BUCKET, recursive=True)
-        except FileNotFoundError:
-            pass
-        try:
-            gcs.mkdir(TEST_BUCKET)
-        except Exception:
-            pass
+        if not is_real_gcs:
+            # ensure we're empty.
+            try:
+                gcs.rm(TEST_BUCKET, recursive=True)
+            except FileNotFoundError:
+                pass
+            try:
+                gcs.mkdir(TEST_BUCKET)
+            except Exception:
+                pass
 
-        if populate:
-            gcs.pipe({TEST_BUCKET + "/" + k: v for k, v in allfiles.items()})
+            if populate:
+                gcs.pipe({TEST_BUCKET + "/" + k: v for k, v in allfiles.items()})
         gcs.invalidate_cache()
         yield gcs
     finally:
-        try:
-            gcs.rm(gcs.find(TEST_BUCKET))
-            gcs.rm(TEST_BUCKET)
-        except:  # noqa: E722
-            pass
+        if not is_real_gcs:
+            try:
+                gcs.rm(TEST_BUCKET, recursive=True)
+            except:  # noqa: E722
+                pass
 
 
 def _cleanup_gcs(gcs, is_real_gcs):
