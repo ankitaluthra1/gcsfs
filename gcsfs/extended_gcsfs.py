@@ -163,21 +163,20 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         if start is None:
             offset = 0
         elif start < 0:
-            size = size or (await self._info(path))["size"]
+            size = (await self._info(path))["size"] if size is None else size
             offset = size + start
         else:
             offset = start
 
         if end is None:
-            size = size or (await self._info(path))["size"]
+            size = (await self._info(path))["size"] if size is None else size
             effective_end = size
         elif end < 0:
-            size = size or (await self._info(path))["size"]
+            size = (await self._info(path))["size"] if size is None else size
             effective_end = size + end
         else:
             effective_end = end
 
-        size = size or (await self._info(path))["size"]
         if offset < 0:
             raise ValueError(f"Calculated start offset ({offset}) cannot be negative.")
         if effective_end < offset:
@@ -186,10 +185,11 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             )
         elif effective_end == offset:
             length = 0  # Handle zero-length slice
-        elif effective_end > size:
-            length = max(0, size - offset)  # Clamp and ensure non-negative
         else:
             length = effective_end - offset  # Normal case
+            size = (await self._info(path))["size"] if size is None else size
+            if effective_end > size:
+                length = max(0, size - offset)  # Clamp and ensure non-negative
 
         return offset, length
 
