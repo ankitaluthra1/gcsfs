@@ -201,9 +201,20 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         bucket_type = await self._lookup_bucket_type(bucket)
         return bucket_type == BucketType.ZONAL_HIERARCHICAL
 
-    async def _cat_file(self, path, start=None, end=None, **kwargs):
-        """
-        Fetch a file's contents as bytes.
+    async def _cat_file(self, path, start=None, end=None, mrd=None, **kwargs):
+        """Fetch a file's contents as bytes, with an optimized path for Zonal buckets.
+
+        This method overrides the parent `_cat_file` to read objects in Zonal buckets using gRPC.
+
+        Args:
+            path (str): The full GCS path to the file (e.g., "bucket/object").
+            start (int, optional): The starting byte position to read from.
+            end (int, optional): The ending byte position to read to.
+            mrd (AsyncMultiRangeDownloader, optional): An existing multi-range
+                downloader instance. If not provided, a new one will be created for Zonal buckets.
+
+        Returns:
+            bytes: The content of the file or file range.
         """
         mrd = kwargs.pop("mrd", None)
         mrd_created = False
@@ -229,6 +240,6 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 offset=offset, length=length, mrd=mrd
             )
         finally:
-            # Explicit cleanup if we created the MRD and it has a close method
+            # Explicit cleanup if we created the MRD
             if mrd_created:
                 await mrd.close()
