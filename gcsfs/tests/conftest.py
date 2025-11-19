@@ -5,6 +5,7 @@ import subprocess
 import time
 from contextlib import nullcontext
 from unittest.mock import patch
+from google.cloud import storage
 
 import fsspec
 import pytest
@@ -186,7 +187,7 @@ def gcs_versioned(gcs_factory):
         if is_real_gcs:
             # For real GCS, we assume the bucket exists and only clean its contents.
             try:
-                gcs.rm(gcs.find(TEST_BUCKET, versions=True))
+                cleanup_versioned_bucket(TEST_BUCKET)
             except Exception as e:
                 logging.warning(f"Failed to empty versioned bucket {TEST_BUCKET}: {e}")
             # Allow time for eventual consistency on real GCS after cleanup
@@ -207,3 +208,19 @@ def gcs_versioned(gcs_factory):
                 gcs.rm(TEST_BUCKET)
         except:  # noqa: E722
             pass
+
+
+def cleanup_versioned_bucket(bucket_name, prefix=None):
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+
+    # List all blobs, including old versions
+    blobs = client.list_blobs(bucket_name, versions=True, prefix=prefix)
+
+    deleted = 0
+    for blob in blobs:
+        print(f"Deleting {blob.name} (generation={blob.generation})")
+        bucket.delete_blob(blob.name, generation=blob.generation)
+        deleted += 1
+
+    print(f"Deleted {deleted} objects (all versions).")

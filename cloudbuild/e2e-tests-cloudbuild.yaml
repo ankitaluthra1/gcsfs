@@ -91,7 +91,7 @@ steps:
           set -e
           echo '--- Installing git and cloning repository on VM ---'
           sudo apt-get update
-          sudo apt-get install -y git python3-pip python3-venv
+          sudo apt-get install -y git python3-pip python3-venv fuse3 libfuse3-dev
 
           # Clone the repository and checkout the specific commit from the build trigger.
           git clone https://github.com/ankitaluthra1/gcsfs.git
@@ -105,7 +105,7 @@ steps:
 
           pip install --upgrade pip
           # Install testing libraries explicitly, as they are not in setup.py
-          pip install pytest pytest-timeout pytest-asyncio
+          pip install pytest pytest-timeout pytest-asyncio fusepy google-cloud-storage
           pip install -e .
 
           echo '--- Preparing test environment on VM ---'
