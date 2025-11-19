@@ -17,6 +17,19 @@ steps:
       - "--location=${_REGION}"
     waitFor: ["-"]
 
+  # Step 1a: Enable versioning on the standard bucket for version-aware tests.
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: "enable-versioning-on-standard-bucket"
+    entrypoint: "gcloud"
+    args:
+      - "storage"
+      - "buckets"
+      - "update"
+      - "gs://gcsfs-test-standard-${_SHORT_BUILD_ID}"
+      - "--versioning"
+    waitFor:
+      - "create-standard-bucket"
+
   # Step 2: Create a unique HNS-enabled GCS bucket for the test run.
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     id: "create-hns-bucket"
@@ -115,7 +128,7 @@ steps:
         gcloud compute ssh gcsfs-test-vm-${_SHORT_BUILD_ID} --zone=${_ZONE} --internal-ip --command="$$VM_SCRIPT"
     waitFor:
       - "create-vm"
-      - "create-standard-bucket"
+      - "enable-versioning-on-standard-bucket"
       - "create-hns-bucket"
 
   # --- Cleanup Steps ---
