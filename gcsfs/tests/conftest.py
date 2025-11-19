@@ -189,6 +189,8 @@ def gcs_versioned(gcs_factory):
                 gcs.rm(gcs.find(TEST_BUCKET, versions=True))
             except Exception as e:
                 logging.warning(f"Failed to empty versioned bucket {TEST_BUCKET}: {e}")
+            # Allow time for eventual consistency on real GCS after cleanup
+            time.sleep(3)
         else:
             # For emulators, we delete and recreate the bucket for a clean state.
             try:
