@@ -1,5 +1,6 @@
 import fsspec
 import pytest
+import logging
 import os
 from fsspec.tests.abstract import AbstractFixtures
 
@@ -16,17 +17,20 @@ class GcsfsFixtures(AbstractFixtures):
         is_real_gcs = (
             os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
         )
-        try:
-            if not is_real_gcs:
-            # ensure we're empty.
+        try:  # ensure we're empty.
+            if is_real_gcs:
+                # For real GCS, we assume the bucket exists and only clean its contents.
+                try:
+                    gcs.rm(gcs.find(TEST_BUCKET))
+                except Exception as e:
+                    logging.warning(f"Failed to empty bucket {TEST_BUCKET}: {e}")
+            else:
+                # For emulators, we delete and recreate the bucket for a clean state.
                 try:
                     gcs.rm(TEST_BUCKET, recursive=True)
                 except FileNotFoundError:
                     pass
-                try:
-                    gcs.mkdir(TEST_BUCKET)
-                except Exception:
-                    pass
+                gcs.mkdir(TEST_BUCKET)
 
             gcs.pipe({TEST_BUCKET + "/" + k: v for k, v in allfiles.items()})
             gcs.invalidate_cache()
