@@ -53,13 +53,15 @@ The script accepts the following command-line arguments:
 
 | Flag | Description                                  | Mandatory | Default Value                     |
 | :--- | :------------------------------------------- | :-------- | :-------------------------------- |
-| `-b` | The GCS bucket to use for the benchmark.     | **Yes**   | -                                 |
-| `-p` | The GCP project ID associated with the bucket. | **Yes**   | -                                 |
+| `-b` | The GCS bucket to use for the benchmark.     | **Yes**   | N/A                               |
+| `-p` | The GCP project ID of the bucket.            | **Yes**   | N/A                               |
 | `-n` | The number of files to read/write.           | No        | 1                                 |
 | `-s` | The size of each file in Megabytes (MB).     | No        | 1                                 |
 | `-r` | The number of benchmark rounds to execute.   | No        | 10                                |
 | `-i` | The number of iterations within each round.  | No        | 1                                 |
-| `-h` | Displays the help message.                   | No        | -                                 |
+| `-c` | Chunk size for I/O in Megabytes (MB).        | No        | 16                                |
+| `--profile` | Enable cProfile for the benchmark run.       | No        | Disabled                          |
+| `-h` | Displays the help message.                   | No        | N/A                               |
 
 ### Example Commands
 
@@ -82,4 +84,3 @@ This command runs a more specific benchmark scenario with 100 files of 10MB each
 After a successful run, the script will generate two files in the project's root directory:
 - `benchmark_results.json`: The raw, detailed output from `pytest-benchmark`.
 - `benchmark_results.tsv`: A tab-separated file containing the consolidated summary table, which is also printed to the console.
-

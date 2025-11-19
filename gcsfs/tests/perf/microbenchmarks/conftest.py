@@ -14,6 +14,11 @@ logging.basicConfig(
 NUM_FILES = int(os.environ.get("GCSFS_BENCH_NUM_FILES", 1))
 FILE_SIZE_MEGABYTES = int(os.environ.get("GCSFS_BENCH_FILE_SIZE_MB", 1))
 FILE_SIZE_BYTES = FILE_SIZE_MEGABYTES * 1024 * 1024
+CHUNK_SIZE_MB = int(os.environ.get("GCSFS_BENCH_CHUNK_SIZE_MB", 16))
+CHUNK_SIZE_BYTES = CHUNK_SIZE_MB * 1024 * 1024
+
+# Ensure chunk size is not larger than file size
+CHUNK_SIZE_BYTES = min(CHUNK_SIZE_BYTES, FILE_SIZE_BYTES)
 
 BUCKET_NAME = os.environ.get("GCSFS_BENCH_BUCKET", "")
 PROJECT_ID = os.environ.get("GCSFS_BENCH_PROJECT", "")
@@ -55,10 +60,16 @@ def gcs_read_benchmark_fixture(request):
     file_paths = [f"{BUCKET_NAME}/{uuid.uuid4()}" for _ in range(num_files)]
     file_content = os.urandom(file_size)
 
-    # Setup: Create the files
+    # Define a fixed chunk size for efficient setup uploads.
+    # For files smaller than this, the file size itself is used.
+    SETUP_CHUNK_SIZE = 8 * 1024 * 1024  # 8MB
+    upload_chunk_size = min(file_size, SETUP_CHUNK_SIZE) if file_size > 0 else 0
+
+    # Setup: Efficiently, create the files in chunks
     for path in file_paths:
         with gcs.open(path, "wb") as f:
-            f.write(file_content)
+            for i in range(0, file_size, upload_chunk_size or 1):
+                f.write(file_content[i:i + upload_chunk_size])
     logging.info(f"Setup complete. Created {num_files} files.")
 
     yield gcs, file_paths, num_files, file_size

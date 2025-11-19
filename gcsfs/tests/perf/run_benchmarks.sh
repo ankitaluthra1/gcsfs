@@ -8,30 +8,41 @@ NUM_FILES=1
 FILE_SIZE_MB=1
 ROUNDS=10
 ITERATIONS=1
+CHUNK_SIZE_MB=16 # Default chunk size in MB
+PROFILE_ENABLED=false
 BUCKET=""   # Mandatory
 PROJECT="" # Mandatory
 
 function usage() {
-    echo "Usage: $0 -b <bucket> -p <project> [-n num_files] [-s size_mb] [-r rounds] [-i iterations]"
+    echo "Usage: $0 -b <bucket> -p <project> [-n num_files] [-s size_mb] [-r rounds] [-i iterations] [-c chunk_mb] [--profile]"
     echo "  -n: Number of files to create for the benchmark (default: $NUM_FILES)"
     echo "  -s: Size of each file in Megabytes (MB) (default: $FILE_SIZE_MB)"
     echo "  -r: Number of benchmark rounds (default: $ROUNDS)"
     echo "  -i: Number of iterations per round (default: $ITERATIONS)"
+    echo "  -c: Chunk size for read/write operations in Megabytes (MB) (default: $CHUNK_SIZE_MB)"
     echo "  -b: GCS bucket to use for the benchmark (MANDATORY)"
     echo "  -p: GCP project to use (MANDATORY)"
+    echo "  --profile: Enable cProfile for the benchmark run (default: disabled)"
     exit 1
 }
 
-while getopts "n:s:r:i:b:p:h" opt; do
+while getopts "n:s:r:i:c:b:p:h" opt; do
   case "$opt" in
     n) NUM_FILES=$OPTARG ;;
     s) FILE_SIZE_MB=$OPTARG ;;
     r) ROUNDS=$OPTARG ;;
     i) ITERATIONS=$OPTARG ;;
+    c) CHUNK_SIZE_MB=$OPTARG ;;
     b) BUCKET=$OPTARG ;;
     p) PROJECT=$OPTARG ;;
     h) usage ;;
     *) usage ;;
+    -)
+      case "${OPTARG}" in
+        profile) PROFILE_ENABLED=true ;;
+        *) usage ;;
+      esac
+      ;;
   esac
 done
 
@@ -59,14 +70,21 @@ export GCSFS_BENCH_NUM_FILES=$NUM_FILES
 export GCSFS_BENCH_FILE_SIZE_MB=$FILE_SIZE_MB
 export GCSFS_BENCH_ROUNDS=$ROUNDS
 export GCSFS_BENCH_ITERATIONS=$ITERATIONS
+export GCSFS_BENCH_CHUNK_SIZE_MB=$CHUNK_SIZE_MB
 export GCSFS_BENCH_BUCKET=$BUCKET
 export GCSFS_BENCH_PROJECT=$PROJECT
 
 # 2. Run all pytest benchmarks with JSON output
 echo "2. Running pytest benchmarks with the following settings:"
-echo "   - Num Files: $NUM_FILES, File Size: ${FILE_SIZE_MB}MB, Bucket: $BUCKET, Project: $PROJECT"
+echo "   - Num Files: $NUM_FILES, File Size: ${FILE_SIZE_MB}MB, Chunk Size: ${CHUNK_SIZE_MB}MB"
+echo "   - Bucket: $BUCKET, Project: $PROJECT"
 echo "   - Rounds: $ROUNDS, Iterations: $ITERATIONS"
-pytest "$BENCHMARK_DIR" --benchmark-json="$JSON_OUTPUT"
+echo "   - Profiling Enabled: $PROFILE_ENABLED"
+
+PYTEST_ARGS=("$BENCHMARK_DIR" "--benchmark-json=$JSON_OUTPUT")
+[ "$PROFILE_ENABLED" = true ] && PYTEST_ARGS+=("--benchmark-cprofile=tottime")
+
+pytest "${PYTEST_ARGS[@]}"
 
 echo "3. Processing benchmark results..."
 
@@ -97,7 +115,7 @@ then
 fi
 
 # Define the header for the output table
-HEADER="Group\tNum_Files\tFile_Size(KB)\tMin(s)\tMax(s)\tMean(s)\tRounds\tIters\tP90(s)\tP95(s)\tP99(s)\tThroughput(MB/s)"
+HEADER="Group\tNum_Files\tFile_Size(MB)\tChunk_Size(MB)\tMin(s)\tMax(s)\tMean(s)\tRounds\tIters\tP90(s)\tP95(s)\tP99(s)\tThroughput(MB/s)"
 
 # Use jq to parse the JSON, calculate metrics, and format as TSV
 jq -r '
@@ -117,7 +135,8 @@ jq -r '
   [
     .group,
     .extra_info.num_files,
-    (.extra_info.file_size / 1024),
+    (.extra_info.file_size / (1024*1024)),
+    (if .extra_info.chunk_size then (.extra_info.chunk_size / (1024*1024)) else "N/A" end),
     (.stats.min | tostring | .[0:8]),
     (.stats.max | tostring | .[0:8]),
     (.stats.mean | tostring | .[0:8]),
