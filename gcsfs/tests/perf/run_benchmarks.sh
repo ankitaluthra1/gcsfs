@@ -10,15 +10,17 @@ ROUNDS=10
 ITERATIONS=1
 CHUNK_SIZE_MB=16 # Default chunk size in MB
 PROFILE_ENABLED=false
+TEST_PATTERN="" # Pytest -k pattern
 BUCKET=""   # Mandatory
 PROJECT="" # Mandatory
 
 function usage() {
-    echo "Usage: $0 -b <bucket> -p <project> [-n num_files] [-s size_mb] [-r rounds] [-i iterations] [-c chunk_mb] [--profile]"
+    echo "Usage: $0 -b <bucket> -p <project> [-n num_files] [-s size_mb] [-r rounds] [-i iterations] [-c chunk_mb] [-k test_pattern] [--profile]"
     echo "  -n: Number of files to create for the benchmark (default: $NUM_FILES)"
     echo "  -s: Size of each file in Megabytes (MB) (default: $FILE_SIZE_MB)"
     echo "  -r: Number of benchmark rounds (default: $ROUNDS)"
     echo "  -i: Number of iterations per round (default: $ITERATIONS)"
+    echo "  -k: Pytest -k pattern to select tests (e.g. 'read or write') (default: all tests)"
     echo "  -c: Chunk size for read/write operations in Megabytes (MB) (default: $CHUNK_SIZE_MB)"
     echo "  -b: GCS bucket to use for the benchmark (MANDATORY)"
     echo "  -p: GCP project to use (MANDATORY)"
@@ -26,7 +28,7 @@ function usage() {
     exit 1
 }
 
-while getopts "n:s:r:i:c:b:p:h" opt; do
+while getopts "n:s:r:i:c:b:p:k:h" opt; do
   case "$opt" in
     n) NUM_FILES=$OPTARG ;;
     s) FILE_SIZE_MB=$OPTARG ;;
@@ -35,6 +37,7 @@ while getopts "n:s:r:i:c:b:p:h" opt; do
     c) CHUNK_SIZE_MB=$OPTARG ;;
     b) BUCKET=$OPTARG ;;
     p) PROJECT=$OPTARG ;;
+    k) TEST_PATTERN=$OPTARG ;;
     h) usage ;;
     *) usage ;;
     -)
@@ -80,9 +83,11 @@ echo "   - Num Files: $NUM_FILES, File Size: ${FILE_SIZE_MB}MB, Chunk Size: ${CH
 echo "   - Bucket: $BUCKET, Project: $PROJECT"
 echo "   - Rounds: $ROUNDS, Iterations: $ITERATIONS"
 echo "   - Profiling Enabled: $PROFILE_ENABLED"
+[ -n "$TEST_PATTERN" ] && echo "   - Test Pattern: '$TEST_PATTERN'"
 
 PYTEST_ARGS=("$BENCHMARK_DIR" "--benchmark-json=$JSON_OUTPUT")
 [ "$PROFILE_ENABLED" = true ] && PYTEST_ARGS+=("--benchmark-cprofile=tottime")
+[ -n "$TEST_PATTERN" ] && PYTEST_ARGS+=("-k" "$TEST_PATTERN")
 
 pytest "${PYTEST_ARGS[@]}"
 
@@ -121,8 +126,8 @@ HEADER="Group\tNum_Files\tFile_Size(MB)\tChunk_Size(MB)\tMin(s)\tMax(s)\tMean(s)
 jq -r '
   # Function to calculate percentile
   def percentile(p):
-    ( (.stats.data | sort)[((.stats.data | length) * p / 100) | floor] ) as $p_val |
-    ($p_val | tostring | .[0:8]);
+    .stats.data | sort | .[((length * p / 100 + 0.5) | floor) - 1] | tostring | .[0:8];
+
 
   # Function to calculate throughput
   def throughput:

@@ -80,6 +80,33 @@ def gcs_read_benchmark_fixture(request):
     logging.info("Teardown complete.")
 
 @pytest.fixture(scope="function", params=benchmark_params)
+def gcs_list_benchmark_fixture(request):
+    """
+    A fixture that sets up and tears down the list benchmarking environment.
+    It creates a parameterized number of zero-byte files.
+    """
+    # For list benchmarks, file size is irrelevant, so we use 0.
+    num_files, _ = request.param
+    file_size = 0
+    logging.info(
+        f"Setting up list benchmark: {num_files} files, 0MB each."
+    )
+    gcs = get_gcs_filesystem(PROJECT_ID)
+    file_paths = [f"{BUCKET_NAME}/{uuid.uuid4()}" for _ in range(num_files)]
+
+    # Setup: Create empty files
+    for path in file_paths:
+        gcs.touch(path)
+    logging.info(f"Setup complete. Created {num_files} empty files.")
+
+    yield gcs, file_paths, num_files, file_size
+
+    # Teardown: Delete the files
+    logging.info(f"Tearing down benchmark. Deleting {num_files} files.")
+    gcs.rm(file_paths)
+    logging.info("Teardown complete.")
+
+@pytest.fixture(scope="function", params=benchmark_params)
 def gcs_write_benchmark_fixture(request):
     """
     A fixture that prepares for and cleans up after a write benchmark.

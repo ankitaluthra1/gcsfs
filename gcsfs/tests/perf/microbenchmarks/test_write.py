@@ -8,7 +8,7 @@ from gcsfs.tests.perf.microbenchmarks.conftest import (
 )
 
 
-def test_write_files(benchmark, gcs_write_benchmark_fixture):
+def test_write(benchmark, gcs_write_benchmark_fixture):
     """Benchmark for writing a number of files sequentially."""
     gcs, file_paths, data, num_files, file_size = gcs_write_benchmark_fixture
     logging.info(
