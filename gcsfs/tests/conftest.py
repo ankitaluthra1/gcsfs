@@ -187,7 +187,7 @@ def gcs_versioned(gcs_factory):
         if is_real_gcs:
             # For real GCS, we assume the bucket exists and only clean its contents.
             try:
-                cleanup_versioned_bucket(TEST_BUCKET)
+                cleanup_versioned_bucket(gcs, TEST_BUCKET)
             except Exception as e:
                 logging.warning(f"Failed to empty versioned bucket {TEST_BUCKET}: {e}")
             # Allow time for eventual consistency on real GCS after cleanup
@@ -210,8 +210,12 @@ def gcs_versioned(gcs_factory):
             pass
 
 
-def cleanup_versioned_bucket(bucket_name, prefix=None):
-    client = storage.Client()
+def cleanup_versioned_bucket(gcs, bucket_name, prefix=None):
+    """
+    Deletes all object versions in a bucket using the google-cloud-storage client,
+    ensuring it uses the same credentials as the gcsfs instance.
+    """
+    client = storage.Client(credentials=gcs.credentials.credentials, project=gcs.project)
     bucket = client.bucket(bucket_name)
 
     # List all blobs, including old versions
