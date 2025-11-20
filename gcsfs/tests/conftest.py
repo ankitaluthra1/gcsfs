@@ -222,8 +222,10 @@ def cleanup_versioned_bucket(gcs, bucket_name, prefix=None):
         print("No objects to delete.")
         return
 
-    with client.batch():
-        for blob in blobs_to_delete:
-            blob.delete()
+    # The batch API has a limit of 1000 requests per batch.
+    for i in range(0, len(blobs_to_delete), 800):
+        with client.batch():
+            for blob in blobs_to_delete[i : i + 800]:
+                blob.delete()
 
     print(f"Batch deleted {len(blobs_to_delete)} objects (all versions).")
