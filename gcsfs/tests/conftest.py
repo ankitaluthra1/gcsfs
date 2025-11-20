@@ -216,15 +216,14 @@ def cleanup_versioned_bucket(gcs, bucket_name, prefix=None):
     ensuring it uses the same credentials as the gcsfs instance.
     """
     client = storage.Client(credentials=gcs.credentials.credentials, project=gcs.project)
-    bucket = client.bucket(bucket_name)
+    blobs_to_delete = list(client.list_blobs(bucket_name, versions=True, prefix=prefix))
 
-    # List all blobs, including old versions
-    blobs = client.list_blobs(bucket_name, versions=True, prefix=prefix)
+    if not blobs_to_delete:
+        print("No objects to delete.")
+        return
 
-    deleted = 0
-    for blob in blobs:
-        print(f"Deleting {blob.name} (generation={blob.generation})")
-        bucket.delete_blob(blob.name, generation=blob.generation)
-        deleted += 1
+    with client.batch():
+        for blob in blobs_to_delete:
+            blob.delete()
 
-    print(f"Deleted {deleted} objects (all versions).")
+    print(f"Batch deleted {len(blobs_to_delete)} objects (all versions).")
