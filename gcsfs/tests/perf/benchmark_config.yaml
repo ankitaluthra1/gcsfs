@@ -1,0 +1,27 @@
+# Common configuration applied to all benchmark runs.
+common:
+  project: "gcs-aiml-clients-testing-101"
+  profile: "no" # "yes" or "no"
+  buckets:
+    regional: "jasha-test-bucket-gcsfs-asia"
+    hns: "jasha-test-bucket-gcsfs-hns-asia"
+    zonal: "" # Optional: "your-zonal-bucket-name"
+
+# A list of benchmark scenarios to run.
+# Each scenario will be run against all buckets defined in the common section.
+benchmarks:
+  - name: "read_1gb_file_100mb_chunk_10_rounds"
+    group: "read"
+    params:
+      num_files: 1
+      file_size: 1024 # in MB
+      chunk_size: 100 # in MB
+      rounds: 10
+
+  - name: "write_1gb_file_100mb_chunk_10_rounds"
+    group: "write"
+    params:
+      num_files: 1
+      file_size: 1024 # in MB
+      chunk_size: 100 # in MB
+      rounds: 1

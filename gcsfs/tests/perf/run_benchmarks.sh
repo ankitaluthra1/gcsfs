@@ -1,133 +1,111 @@
 #!/bin/bash
 
-# Exit immediately if a command exits with a non-zero status.
 set -e
 
-# --- Default Benchmark Parameters ---
-NUM_FILES=1
-FILE_SIZE_MB=1
-ROUNDS=10
-ITERATIONS=1
-CHUNK_SIZE_MB=16 # Default chunk size in MB
-PROFILE_ENABLED=false
-TEST_PATTERN="" # Pytest -k pattern
-BUCKET=""   # Mandatory
-PROJECT="" # Mandatory
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+PROJECT_ROOT="$SCRIPT_DIR/../../../.."
+CONFIG_FILE="$SCRIPT_DIR/benchmark_config.yaml" # Assumes yq v3 syntax
+TSV_OUTPUT="$PROJECT_ROOT/consolidated_benchmark_results.tsv"
+SCENARIO_NAME="" # Optional: a specific scenario name to run
 
 function usage() {
-    echo "Usage: $0 -b <bucket> -p <project> [-n num_files] [-s size_mb] [-r rounds] [-i iterations] [-c chunk_mb] [-k test_pattern] [--profile]"
-    echo "  -n: Number of files to create for the benchmark (default: $NUM_FILES)"
-    echo "  -s: Size of each file in Megabytes (MB) (default: $FILE_SIZE_MB)"
-    echo "  -r: Number of benchmark rounds (default: $ROUNDS)"
-    echo "  -i: Number of iterations per round (default: $ITERATIONS)"
-    echo "  -k: Pytest -k pattern to select tests (e.g. 'read or write') (default: all tests)"
-    echo "  -c: Chunk size for read/write operations in Megabytes (MB) (default: $CHUNK_SIZE_MB)"
-    echo "  -b: GCS bucket to use for the benchmark (MANDATORY)"
-    echo "  -p: GCP project to use (MANDATORY)"
-    echo "  --profile: Enable cProfile for the benchmark run (default: disabled)"
+    echo "Usage: $0 [-s <scenario_name>]"
+    echo "  -s: (Optional) The specific benchmark scenario name from benchmark_config.yaml to run."
     exit 1
 }
 
-while getopts "n:s:r:i:c:b:p:k:h" opt; do
-  case "$opt" in
-    n) NUM_FILES=$OPTARG ;;
-    s) FILE_SIZE_MB=$OPTARG ;;
-    r) ROUNDS=$OPTARG ;;
-    i) ITERATIONS=$OPTARG ;;
-    c) CHUNK_SIZE_MB=$OPTARG ;;
-    b) BUCKET=$OPTARG ;;
-    p) PROJECT=$OPTARG ;;
-    k) TEST_PATTERN=$OPTARG ;;
-    h) usage ;;
-    *) usage ;;
-    -)
-      case "${OPTARG}" in
-        profile) PROFILE_ENABLED=true ;;
-        *) usage ;;
-      esac
-      ;;
-  esac
-done
+check_dependencies() {
+    echo "## Checking dependencies..."
+    if ! command -v yq &> /dev/null; then
+        echo "yq not found. Attempting to install..."
+        if command -v apt-get &> /dev/null; then sudo apt-get update && sudo apt-get install -y yq;
+        elif command -v yum &> /dev/null; then sudo yum install -y yq;
+        elif command -v dnf &> /dev/null; then sudo dnf install -y yq;
+        else echo "Could not find a supported package manager. Please install yq (v3) manually."; exit 1; fi
+        if ! command -v yq &> /dev/null; then echo "yq installation failed."; exit 1; fi
+    fi
+    echo "Dependencies are satisfied."
+}
 
-# Check for mandatory arguments
-if [ -z "$BUCKET" ] || [ -z "$PROJECT" ]; then
-    echo "Error: Bucket name (-b) and Project ID (-p) are mandatory."
-    usage
-fi
+cleanup_previous_results() {
+    echo "## Cleaning up previous results..."
+    rm -f "$PROJECT_ROOT"/benchmark_results_*.json "$PROJECT_ROOT"/resource_stats_*.log "$TSV_OUTPUT"
+}
 
-# Get the directory of the script to build absolute paths
-SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-PROJECT_ROOT="$SCRIPT_DIR/../../../.."
-BENCHMARK_DIR="$SCRIPT_DIR/microbenchmarks"
-JSON_OUTPUT="$PROJECT_ROOT/benchmark_results.json"
-TSV_OUTPUT="${JSON_OUTPUT%.json}.tsv"
+load_common_config() {
+    echo "## Loading Common Configuration..."
+    export PROJECT=$(yq -r '.common.project' "$CONFIG_FILE")
+    export PROFILE=$(yq -r '.common.profile' "$CONFIG_FILE")
+    export REGIONAL_BUCKET=$(yq -r '.common.buckets.regional' "$CONFIG_FILE")
+    export HNS_BUCKET=$(yq -r '.common.buckets.hns' "$CONFIG_FILE")
+    export ZONAL_BUCKET=$(yq -r '.common.buckets.zonal' "$CONFIG_FILE")
 
-echo "--- GCSFS Benchmark Runner ---"
-
-# 1. Delete benchmark_results.json file if present
-echo "1. Cleaning up previous results..."
-rm -f "$JSON_OUTPUT"
-
-# Export parameters as environment variables for pytest
-export GCSFS_BENCH_NUM_FILES=$NUM_FILES
-export GCSFS_BENCH_FILE_SIZE_MB=$FILE_SIZE_MB
-export GCSFS_BENCH_ROUNDS=$ROUNDS
-export GCSFS_BENCH_ITERATIONS=$ITERATIONS
-export GCSFS_BENCH_CHUNK_SIZE_MB=$CHUNK_SIZE_MB
-export GCSFS_BENCH_BUCKET=$BUCKET
-export GCSFS_BENCH_PROJECT=$PROJECT
-
-# 2. Run all pytest benchmarks with JSON output
-echo "2. Running pytest benchmarks with the following settings:"
-echo "   - Num Files: $NUM_FILES, File Size: ${FILE_SIZE_MB}MB, Chunk Size: ${CHUNK_SIZE_MB}MB"
-echo "   - Bucket: $BUCKET, Project: $PROJECT"
-echo "   - Rounds: $ROUNDS, Iterations: $ITERATIONS"
-echo "   - Profiling Enabled: $PROFILE_ENABLED"
-[ -n "$TEST_PATTERN" ] && echo "   - Test Pattern: '$TEST_PATTERN'"
-
-PYTEST_ARGS=("$BENCHMARK_DIR" "--benchmark-json=$JSON_OUTPUT")
-[ "$PROFILE_ENABLED" = true ] && PYTEST_ARGS+=("--benchmark-cprofile=tottime")
-[ -n "$TEST_PATTERN" ] && PYTEST_ARGS+=("-k" "$TEST_PATTERN")
-
-pytest "${PYTEST_ARGS[@]}"
-
-echo "3. Processing benchmark results..."
-
-# 3. Read the JSON and format it into a table using jq
-# Check if jq is installed
-if ! command -v jq &> /dev/null
-then
-    echo "jq not found. Attempting to install it automatically..."
-    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        if command -v apt-get &> /dev/null; then
-            sudo apt-get update && sudo apt-get install -y jq
-        elif command -v yum &> /dev/null; then
-            sudo yum install -y jq
-        else
-            echo "Error: Could not find apt-get or yum. Please install jq manually."
-            exit 1
-        fi
-    else
-        echo "Error: Unsupported OS '$OSTYPE'. Please install jq manually."
+    if [ "$PROJECT" = "null" ] || [ -z "$PROJECT" ]; then
+        echo "Error: 'project' not defined in common config in $CONFIG_FILE"
         exit 1
     fi
 
-    if ! command -v jq &> /dev/null; then
-        echo "jq installation failed. Please install it manually."
-        exit 1
+    echo "Project: $PROJECT"
+    [ "$REGIONAL_BUCKET" != "null" ] && echo "Regional Bucket: $REGIONAL_BUCKET"
+    [ "$HNS_BUCKET" != "null" ] && echo "HNS Bucket: $HNS_BUCKET"
+    [ "$ZONAL_BUCKET" != "null" ] && echo "Zonal Bucket: $ZONAL_BUCKET"
+}
+
+run_scenario() {
+    local name=$1
+    echo -e "\n## Starting scenario: $name"
+
+    # Fetch the full YAML object for the given scenario name
+    local scenario_yaml=$(yq ".benchmarks[] | select(.name == \"$name\")" "$CONFIG_FILE")
+    if [[ -z "$scenario_yaml" || "$scenario_yaml" == "null" ]]; then
+        echo "Warning: Scenario '$name' not found in $CONFIG_FILE. Skipping."
+        return
     fi
-    echo "jq installed successfully."
-fi
 
-# Define the header for the output table
-HEADER="Group\tNum_Files\tFile_Size(MB)\tChunk_Size(MB)\tMin(s)\tMax(s)\tMean(s)\tRounds\tIters\tP90(s)\tP95(s)\tP99(s)\tThroughput(MB/s)"
+    local group=$(echo "$scenario_yaml" | yq -r '.group')
+    local num_files=$(echo "$scenario_yaml" | yq -r '.params.num_files')
+    local file_size=$(echo "$scenario_yaml" | yq -r '.params.file_size')
+    local chunk_size=$(echo "$scenario_yaml" | yq -r '.params.chunk_size')
+    local depth=$(echo "$scenario_yaml" | yq -r '.params.depth')
+    local files_per_dir=$(echo "$scenario_yaml" | yq -r '.params.files_per_dir')
+    local rounds=$(echo "$scenario_yaml" | yq -r '.params.rounds')
 
-# Use jq to parse the JSON, calculate metrics, and format as TSV
-jq -r '
+    # Build the command for the worker script
+    local CMD=("$SCRIPT_DIR/execute_scenario.sh" -p "$PROJECT" -k "$group")
+
+    [ "$REGIONAL_BUCKET" != "null" ] && CMD+=(--regional-bucket "$REGIONAL_BUCKET")
+    [ "$HNS_BUCKET" != "null" ] && CMD+=(--hns-bucket "$HNS_BUCKET")
+    [ "$ZONAL_BUCKET" != "null" ] && CMD+=(--zonal-bucket "$ZONAL_BUCKET")
+
+    [ "$num_files" != "null" ] && CMD+=(-n "$num_files")
+    [ "$file_size" != "null" ] && CMD+=(-s "$file_size")
+    [ "$chunk_size" != "null" ] && CMD+=(-c "$chunk_size")
+    [ "$depth" != "null" ] && CMD+=(-d "$depth")
+    [ "$files_per_dir" != "null" ] && CMD+=(-f "$files_per_dir")
+    [ "$rounds" != "null" ] && CMD+=(-r "$rounds")
+    [ "$PROFILE" = "yes" ] && CMD+=(--profile)
+
+    CMD+=(--json-output-prefix "benchmark_results_${name//\"/}")
+
+    # Execute the worker script
+    "${CMD[@]}"
+}
+
+process_results() {
+    echo -e "\n## All scenarios complete. Consolidating results..."
+    local HEADER="Group\tBucket_Name\tBucket_Type\tNum_Files\tFile_Size(MB)\tChunk_Size(MB)\tMin(s)\tMax(s)\tMean(s)\tRounds\tIters\tP90(s)\tP95(s)\tP99(s)\tThroughput(MB/s)"
+
+    # Check if any result files were created
+    if ! ls "$PROJECT_ROOT"/benchmark_results_*.json 1> /dev/null 2>&1; then
+        echo "No benchmark result files found. Skipping result processing."
+        return
+    fi
+
+    # Use jq to parse all generated JSON files, calculate metrics, and format as TSV
+    jq -r '
   # Function to calculate percentile
   def percentile(p):
     .stats.data | sort | .[((length * p / 100 + 0.5) | floor) - 1] | tostring | .[0:8];
-
 
   # Function to calculate throughput
   def throughput:
@@ -136,9 +114,12 @@ jq -r '
     end;
 
   # Main processing logic
-  .benchmarks[] |
+  # Input is a stream of {bucket_type, data} objects
+  .data.benchmarks[] |
   [
     .group,
+    .extra_info.bucket_name,
+    .extra_info.bucket_type,
     .extra_info.num_files,
     (.extra_info.file_size / (1024*1024)),
     (if .extra_info.chunk_size then (.extra_info.chunk_size / (1024*1024)) else "N/A" end),
@@ -152,11 +133,48 @@ jq -r '
     percentile(99),
     throughput
   ] | @tsv
-' "$JSON_OUTPUT" | (echo -e "$HEADER" && cat) | column -t -s $'\t' > "$TSV_OUTPUT"
+' <(
+      # Find all JSON files and wrap them in an object with their bucket type
+      for f in "$PROJECT_ROOT"/benchmark_results_*.json; do
+        local bucket_type=$(basename "$f" | sed -e 's/.*_\(regional\|hns\|zonal\)\.json/\1/')
+        jq -c --arg bucket_type "$bucket_type" '{bucket_type: $bucket_type, data: .}' "$f"
+      done
+    ) | (echo -e "$HEADER" && cat) | column -t -s $'\t' > "$TSV_OUTPUT"
 
-echo -e "\n--- Consolidated Benchmark Results ---"
-cat "$TSV_OUTPUT"
+    echo -e "\n--- Consolidated Benchmark Results ---"
+    cat "$TSV_OUTPUT"
+    echo -e "\nFormatted results are saved in: $TSV_OUTPUT"
+}
 
-echo -e "\n--- Benchmark run complete ---"
-echo "Raw python-benchmark results are saved in: $JSON_OUTPUT"
-echo "Formatted results are saved in: $TSV_OUTPUT"
+main() {
+    [ "$1" = "-s" ] && [ -n "$2" ] && SCENARIO_NAME=$2
+
+    echo "--- GCSFS Benchmark Orchestrator ---"
+    
+    check_dependencies
+    cleanup_previous_results
+    load_common_config
+
+    # Get all available benchmark names from the config file
+    local all_scenario_names=$(yq -r '.benchmarks[].name' "$CONFIG_FILE")
+    
+    if [ -z "$SCENARIO_NAME" ]; then
+        echo -e "\n## No specific scenario requested. Running all benchmarks..."
+        for name in $all_scenario_names; do
+            run_scenario "$name"
+        done
+    else
+        echo -e "\n## Running single scenario: $SCENARIO_NAME"
+        # Validate that the requested scenario exists
+        if ! echo "$all_scenario_names" | grep -q -w "$SCENARIO_NAME"; then
+            echo "Error: Scenario '$SCENARIO_NAME' not found in $CONFIG_FILE"
+            exit 1
+        fi
+        run_scenario "$SCENARIO_NAME" 
+    fi
+
+    process_results
+    echo -e "\n--- Benchmark run complete ---"
+}
+
+main "$@"

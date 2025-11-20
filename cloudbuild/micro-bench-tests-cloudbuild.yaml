@@ -1,0 +1,179 @@
+# cloudbuild.yaml for gcsfs-benchmarks
+
+substitutions:
+  _REGION: "us-central1"
+  _ZONE: "us-central1-a"
+  _RESULTS_BUCKET: "gcsfs-micro-benchmark-results"  # HNS-enabled bucket to store results
+  _VM_SERVICE_ACCOUNT: ""
+  _RUN_ID: "${_DATE}-${SHORT_BUILD_ID}"
+  _DATE: $(date +%d%m%Y)
+
+steps:
+# --- Setup Steps ---
+
+# Step 1: Create the results bucket (if it doesn't exist) and a folder for this run.
+- name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+  id: "setup-results-bucket"
+  entrypoint: "bash"
+  args:
+  - "-c"
+  - |
+    # Create the HNS results bucket if it doesn't exist.
+    gcloud storage buckets describe gs://${_RESULTS_BUCKET} || \
+      gcloud storage buckets create gs://${_RESULTS_BUCKET} --project=${PROJECT_ID} --location=${_REGION} --enable-hierarchical-namespace
+
+    # Create a folder for the current run.
+    gcloud storage objects list gs://${_RESULTS_BUCKET}/${_RUN_ID}/ || \
+      echo "Benchmark results for run ${_RUN_ID}" | gcloud storage objects cp - gs://${_RESULTS_BUCKET}/${_RUN_ID}/
+
+# Step 2: Create a unique regional/standard GCS bucket for the benchmark run.
+- name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+  id: "create-regional-bucket"
+  entrypoint: "gcloud"
+  args:
+  - "storage"
+  - "buckets"
+  - "create"
+  - "gs://gcsfs-bench-regional-${SHORT_BUILD_ID}"
+  - "--project=${PROJECT_ID}"
+  - "--location=${_REGION}"
+  waitFor: ["-"]
+
+# Step 3: Create a unique HNS-enabled GCS bucket for the benchmark run.
+- name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+  id: "create-hns-bucket"
+  entrypoint: "gcloud"
+  args:
+  - "storage"
+  - "buckets"
+  - "create"
+  - "gs://gcsfs-bench-hns-${SHORT_BUILD_ID}"
+  - "--project=${PROJECT_ID}"
+  - "--location=${_REGION}"
+  - "--enable-hierarchical-namespace"
+  waitFor: ["-"]
+
+# Step 4: Create a unique Zonal GCS bucket for the benchmark run.
+- name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+  id: "create-zonal-bucket"
+  entrypoint: "gcloud"
+  args:
+  - "storage"
+  - "buckets"
+  - "create"
+  - "gs://gcsfs-bench-zonal-${SHORT_BUILD_ID}"
+  - "--project=${PROJECT_ID}"
+  - "--location=${_ZONE}"
+  waitFor: ["-"]
+
+# Step 5: Create a GCE VM to run the benchmarks.
+- name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+  id: "create-vm"
+  entrypoint: "gcloud"
+  args:
+  - "compute"
+  - "instances"
+  - "create"
+  - "gcsfs-bench-vm-${SHORT_BUILD_ID}"
+  - "--project=${PROJECT_ID}"
+  - "--zone=${_ZONE}"
+  - "--machine-type=e2-standard-4"
+  - "--image-family=debian-11"
+  - "--image-project=debian-cloud"
+  - "--service-account=${_ZONAL_VM_SERVICE_ACCOUNT}"
+  - "--tags=allow-ssh"
+  - "--scopes=https://www.googleapis.com/auth/cloud-platform" # Full access to project APIs
+  - "--metadata=enable-oslogin=TRUE"
+  waitFor: ["-"]
+
+# --- Benchmark Execution Step ---
+
+# Step 6: Run the benchmarks inside the newly created VM.
+- name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+  id: "run-benchmarks-on-vm"
+  entrypoint: "bash"
+  env:
+  - 'CI=true'
+  args:
+  - "-c"
+  - |
+    # Wait for the VM to be ready for SSH.
+    for i in {1..10}; do
+      if gcloud compute ssh gcsfs-bench-vm-${SHORT_BUILD_ID} --zone=${_ZONE} --quiet --command="whoami"; then
+        break
+      fi
+      echo "Waiting for VM to become available... (attempt $$i/10)"
+      sleep 15
+    done
+
+    # This multi-line script will be executed on the VM.
+    VM_SCRIPT="
+      set -e
+      echo '--- Installing dependencies on VM ---'
+      sudo apt-get update && sudo apt-get install -y git python3 python3-pip jq
+
+      echo '--- Cloning repository on VM ---'
+      git clone https://github.com/ankitaluthra1/gcsfs.git
+      cd gcsfs
+      git fetch origin pull/13/head:test/micro-benchmarks-read-write
+      git checkout test/micro-benchmarks-read-write
+
+
+      echo '--- Installing Python dependencies on VM ---'
+      pip3 install -r gcsfs/tests/perf/microbenchmarks/requirements.txt
+
+      echo '--- Running benchmarks on VM ---'
+      ./gcsfs/tests/perf/run_benchmarks.sh \
+        -b gs://gcsfs-bench-regional-${SHORT_BUILD_ID} \
+        -z gs://gcsfs-bench-zonal-${SHORT_BUILD_ID} \
+        -n gs://gcsfs-bench-hns-${SHORT_BUILD_ID} \
+        -p ${PROJECT_ID} \
+        -k 'read,write,list'
+    "
+    # Execute the script on the VM via SSH.
+    gcloud compute ssh gcsfs-bench-vm-${SHORT_BUILD_ID} --zone=${_ZONE} --command="$$VM_SCRIPT"
+  waitFor:
+  - "create-vm"
+  - "create-regional-bucket"
+  - "create-hns-bucket"
+  - "create-zonal-bucket"
+
+# --- Upload Results ---
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  id: 'upload-results'
+  entrypoint: 'gsutil'
+  args:
+    - 'cp'
+    - 'benchmark_results.json'
+    - 'benchmark_results.tsv'
+    - 'gs://${_RESULTS_BUCKET}/${_RUN_ID}/'
+  waitFor:
+    - 'run-benchmarks-on-vm'
+
+# --- Cleanup Steps ---
+
+# Step 7: Delete the GCE VM.
+- name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+  id: "delete-vm"
+  entrypoint: "gcloud"
+  args: ["compute", "instances", "delete", "gcsfs-bench-vm-${SHORT_BUILD_ID}", "--zone=${_ZONE}", "--quiet"]
+  waitFor: ["run-benchmarks-on-vm"]
+
+# Step 8: Delete the benchmark buckets.
+- name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+  id: "delete-benchmark-buckets"
+  entrypoint: "bash"
+  args:
+  - "-c"
+  - |
+    gcloud storage rm --recursive gs://gcsfs-bench-regional-${SHORT_BUILD_ID}
+    gcloud storage rm --recursive gs://gcsfs-bench-hns-${SHORT_BUILD_ID}
+    gcloud storage rm --recursive gs://gcsfs-bench-zonal-${SHORT_BUILD_ID}
+  waitFor: ["run-benchmarks-on-vm"]
+
+timeout: "3600s" # 60 minutes
+options:
+  logging: CLOUD_LOGGING_ONLY
+  pool:
+      name: "projects/${PROJECT_ID}/locations/us-central1/workerPools/cloud-build-worker-pool"
+
