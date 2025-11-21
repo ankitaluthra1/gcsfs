@@ -37,20 +37,25 @@ jobs:
           pip install -e .
       - name: Run Standard Tests
         run: |
+          pip install "git+https://github.com/googleapis/python-storage@main#egg=google-cloud-storage" --force-reinstall --no-cache-dir --upgrade
           export GOOGLE_APPLICATION_CREDENTIALS=$(pwd)/gcsfs/tests/fake-secret.json
           pytest -vv -s \
           --log-format="%(asctime)s %(levelname)s %(message)s" \
           --log-date-format="%H:%M:%S" \
           gcsfs/ \
-          --ignore=gcsfs/tests/test_extended_gcsfs.py
+          --ignore=gcsfs/tests/test_extended_gcsfs.py \
+          --ignore=gcsfs/tests/test_zonal_file.py
+
       - name: Run Extended Tests
         run: |
+          pip install "git+https://github.com/googleapis/python-storage@main#egg=google-cloud-storage" --force-reinstall --no-cache-dir --upgrade
           export GOOGLE_APPLICATION_CREDENTIALS=$(pwd)/gcsfs/tests/fake-secret.json
           export GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT="true"
           pytest -vv -s \
             --log-format="%(asctime)s %(levelname)s %(message)s" \
             --log-date-format="%H:%M:%S" \
-            gcsfs/tests/test_extended_gcsfs.py
+            gcsfs/tests/test_extended_gcsfs.py \
+            gcsfs/tests/test_zonal_file.py
 
   lint:
     name: lint
