@@ -1864,6 +1864,7 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
         self.bucket = bucket
         self.key = key
         self.acl = acl
+        self.consistency = consistency
         self.checker = get_consistency_checker(consistency)
 
         if "a" in self.mode:
@@ -2073,6 +2074,18 @@ def _convert_fixed_key_metadata(metadata, *, from_google=False):
 
 
 async def upload_chunk(fs, location, data, offset, size, content_type):
+    from google.cloud.storage._experimental.asyncio.async_appendable_object_writer import (
+        AsyncAppendableObjectWriter,
+    )
+
+    from .extended_gcsfs import ExtendedGcsFileSystem
+    from .extended_gcsfs import upload_chunk as ext_upload_chunk
+
+    if isinstance(fs, ExtendedGcsFileSystem) and isinstance(
+        location, AsyncAppendableObjectWriter
+    ):
+
+        return await ext_upload_chunk(fs, location, data, offset, size, content_type)
     head = {}
     l = len(data)
     range = "bytes %i-%i/%i" % (offset, offset + l - 1, size)
@@ -2101,6 +2114,22 @@ async def initiate_upload(
     mode="overwrite",
     kms_key_name=None,
 ):
+    from .extended_gcsfs import ExtendedGcsFileSystem
+    from .extended_gcsfs import initiate_upload as ext_initiate_upload
+
+    if isinstance(fs, ExtendedGcsFileSystem) and await fs._is_zonal_bucket(bucket):
+
+        return await ext_initiate_upload(
+            fs,
+            bucket,
+            key,
+            content_type,
+            metadata,
+            fixed_key_metadata,
+            mode,
+            kms_key_name,
+        )
+
     j = {"name": key}
     if metadata:
         j["metadata"] = metadata
@@ -2135,6 +2164,24 @@ async def simple_upload(
     mode="overwrite",
     kms_key_name=None,
 ):
+    from .extended_gcsfs import ExtendedGcsFileSystem
+    from .extended_gcsfs import simple_upload as ext_simple_upload
+
+    if isinstance(fs, ExtendedGcsFileSystem) and await fs._is_zonal_bucket(bucket):
+
+        return await ext_simple_upload(
+            fs,
+            bucket,
+            key,
+            datain,
+            metadatain,
+            consistency,
+            content_type,
+            fixed_key_metadata,
+            mode,
+            kms_key_name,
+        )
+
     checker = get_consistency_checker(consistency)
     path = f"{fs._location}/upload/storage/v1/b/{quote(bucket)}/o"
     metadata = {"name": key}
