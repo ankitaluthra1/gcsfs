@@ -5,8 +5,12 @@ from fsspec import asyn
 from google.api_core import exceptions as api_exceptions
 from google.api_core import gapic_v1
 from google.api_core.client_info import ClientInfo
+from google.auth.credentials import AnonymousCredentials
 from google.cloud import storage_control_v2
 from google.cloud.storage._experimental.asyncio.async_grpc_client import AsyncGrpcClient
+from google.cloud.storage._experimental.asyncio.async_multi_range_downloader import (
+    AsyncMultiRangeDownloader,
+)
 
 from gcsfs import __version__ as version
 from gcsfs import zb_hns_utils
@@ -45,6 +49,9 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         super().__init__(*args, **kwargs)
         self.grpc_client = None
         self.storage_control_client = None
+        self.credential = self.credentials.credentials
+        if self.credentials.token == "anon":
+            self.credential = AnonymousCredentials()
         # initializing grpc and storage control client for Hierarchical and
         # zonal bucket operations
         self.grpc_client = asyn.sync(self.loop, self._create_grpc_client)
@@ -56,6 +63,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
     async def _create_grpc_client(self):
         if self.grpc_client is None:
             return AsyncGrpcClient(
+                credentials=self.credential,
                 client_info=ClientInfo(user_agent=f"{USER_AGENT}/{version}"),
             ).grpc_client
         else:
@@ -68,17 +76,24 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             user_agent=f"{USER_AGENT}/{version}"
         )
         return storage_control_v2.StorageControlAsyncClient(
-            credentials=self.credentials.credentials, client_info=client_info
+            credentials=self.credential, client_info=client_info
         )
 
-    async def _get_bucket_type(self, bucket):
+    async def _lookup_bucket_type(self, bucket):
         if bucket in self._storage_layout_cache:
             return self._storage_layout_cache[bucket]
-        try:
+        bucket_type = await self._get_bucket_type(bucket)
+        # Dont cache UNKNOWN type
+        if bucket_type == BucketType.UNKNOWN:
+            return BucketType.UNKNOWN
+        self._storage_layout_cache[bucket] = bucket_type
+        return self._storage_layout_cache[bucket]
 
-            # Bucket name details
+    _sync_lookup_bucket_type = asyn.sync_wrapper(_lookup_bucket_type)
+
+    async def _get_bucket_type(self, bucket):
+        try:
             bucket_name_value = f"projects/_/buckets/{bucket}/storageLayout"
-            # Make the request to get bucket type
             response = await self._storage_control_client.get_storage_layout(
                 name=bucket_name_value
             )
@@ -89,16 +104,14 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 # This should be updated to include HNS in the future
                 return BucketType.NON_HIERARCHICAL
         except api_exceptions.NotFound:
-            print(f"Error: Bucket {bucket} not found or you lack permissions.")
+            logger.warning(f"Error: Bucket {bucket} not found or you lack permissions.")
             return BucketType.UNKNOWN
         except Exception as e:
             logger.error(
                 f"Could not determine bucket type for bucket name {bucket}: {e}"
             )
-            # Default to UNKNOWN
+            # Default to UNKNOWN in case bucket type is not obtained
             return BucketType.UNKNOWN
-
-    _sync_get_bucket_type = asyn.sync_wrapper(_get_bucket_type)
 
     def _open(
         self,
@@ -118,8 +131,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         Open a file.
         """
         bucket, _, _ = self.split_path(path)
-        bucket_type = self._sync_get_bucket_type(bucket)
-        self._storage_layout_cache[bucket] = bucket_type
+        bucket_type = self._sync_lookup_bucket_type(bucket)
         return gcs_file_types[bucket_type](
             self,
             path,
@@ -156,21 +168,20 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         if start is None:
             offset = 0
         elif start < 0:
-            size = size or (await self._info(path))["size"]
+            size = (await self._info(path))["size"] if size is None else size
             offset = size + start
         else:
             offset = start
 
         if end is None:
-            size = size or (await self._info(path))["size"]
+            size = (await self._info(path))["size"] if size is None else size
             effective_end = size
         elif end < 0:
-            size = size or (await self._info(path))["size"]
+            size = (await self._info(path))["size"] if size is None else size
             effective_end = size + end
         else:
             effective_end = end
 
-        size = size or (await self._info(path))["size"]
         if offset < 0:
             raise ValueError(f"Calculated start offset ({offset}) cannot be negative.")
         if effective_end < offset:
@@ -179,10 +190,11 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             )
         elif effective_end == offset:
             length = 0  # Handle zero-length slice
-        elif effective_end > size:
-            length = max(0, size - offset)  # Clamp and ensure non-negative
         else:
             length = effective_end - offset  # Normal case
+            size = (await self._info(path))["size"] if size is None else size
+            if effective_end > size:
+                length = max(0, size - offset)  # Clamp and ensure non-negative
 
         return offset, length
 
@@ -191,13 +203,23 @@ class ExtendedGcsFileSystem(GCSFileSystem):
     )
 
     async def _is_zonal_bucket(self, bucket):
-        bucket_type = await self._get_bucket_type(bucket)
-        self._storage_layout_cache[bucket] = bucket_type
+        bucket_type = await self._lookup_bucket_type(bucket)
         return bucket_type == BucketType.ZONAL_HIERARCHICAL
 
-    async def _cat_file(self, path, start=None, end=None, **kwargs):
-        """
-        Fetch a file's contents as bytes.
+    async def _cat_file(self, path, start=None, end=None, mrd=None, **kwargs):
+        """Fetch a file's contents as bytes, with an optimized path for Zonal buckets.
+
+        This method overrides the parent `_cat_file` to read objects in Zonal buckets using gRPC.
+
+        Args:
+            path (str): The full GCS path to the file (e.g., "bucket/object").
+            start (int, optional): The starting byte position to read from.
+            end (int, optional): The ending byte position to read to.
+            mrd (AsyncMultiRangeDownloader, optional): An existing multi-range
+                downloader instance. If not provided, a new one will be created for Zonal buckets.
+
+        Returns:
+            bytes: The content of the file or file range.
         """
         mrd = kwargs.pop("mrd", None)
         mrd_created = False
@@ -210,7 +232,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             if not await self._is_zonal_bucket(bucket):
                 return await super()._cat_file(path, start=start, end=end, **kwargs)
 
-            mrd = await zb_hns_utils.create_mrd(
+            mrd = await AsyncMultiRangeDownloader.create_mrd(
                 self.grpc_client, bucket, object_name, generation
             )
             mrd_created = True
@@ -223,6 +245,44 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 offset=offset, length=length, mrd=mrd
             )
         finally:
-            # Explicit cleanup if we created the MRD and it has a close method
+            # Explicit cleanup if we created the MRD
             if mrd_created:
                 await mrd.close()
+
+
+async def upload_chunk(fs, location, data, offset, size, content_type):
+    raise NotImplementedError(
+        "upload_chunk is not implemented yet for ExtendedGcsFileSystem. Please use write() instead."
+    )
+
+
+async def initiate_upload(
+    fs,
+    bucket,
+    key,
+    content_type="application/octet-stream",
+    metadata=None,
+    fixed_key_metadata=None,
+    mode="overwrite",
+    kms_key_name=None,
+):
+    raise NotImplementedError(
+        "initiate_upload is not implemented yet for ExtendedGcsFileSystem. Please use write() instead."
+    )
+
+
+async def simple_upload(
+    fs,
+    bucket,
+    key,
+    datain,
+    metadatain=None,
+    consistency=None,
+    content_type="application/octet-stream",
+    fixed_key_metadata=None,
+    mode="overwrite",
+    kms_key_name=None,
+):
+    raise NotImplementedError(
+        "simple_upload is not implemented yet for ExtendedGcsFileSystem. Please use write() instead."
+    )

@@ -3,8 +3,6 @@ import os
 import shlex
 import subprocess
 import time
-from contextlib import nullcontext
-from unittest.mock import patch
 
 import fsspec
 import pytest
@@ -129,12 +127,10 @@ def gcs(gcs_factory, populate=True):
 
 def _cleanup_gcs(gcs, is_real_gcs):
     """Only remove the bucket/contents if we are NOT using the real GCS, logging a warning on failure."""
-    del os.environ["GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT"]
     if is_real_gcs:
         return
     try:
-        gcs.rm(gcs.find(TEST_BUCKET), recursive=True)
-        gcs.rm(TEST_BUCKET)
+        gcs.rm(TEST_BUCKET, recursive=True)
     except Exception as e:
         logging.warning(f"Failed to clean up GCS bucket {TEST_BUCKET}: {e}")
 
@@ -146,36 +142,23 @@ def extended_gcsfs(gcs_factory, populate=True):
         os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
     )
 
-    # Mock authentication if not using a real GCS endpoint,
-    # since grpc client in extended_gcsfs does not work with anon access
-    mock_authentication_manager = (
-        patch("google.auth.default", return_value=(None, "fake-project"))
-        if not is_real_gcs
-        else nullcontext()
-    )
-
-    with mock_authentication_manager:
-        os.environ["GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT"] = "true"
-        extended_gcsfs = gcs_factory()
-        try:
-            # Only create/delete/populate the bucket if we are NOT using the real GCS endpoint
-            if not is_real_gcs:
-                try:
-                    extended_gcsfs.rm(TEST_BUCKET, recursive=True)
-                except FileNotFoundError:
-                    pass
-                try:
-                    extended_gcsfs.mkdir(TEST_BUCKET)
-                except Exception:
-                    pass
-                if populate:
-                    extended_gcsfs.pipe(
-                        {TEST_BUCKET + "/" + k: v for k, v in allfiles.items()}
-                    )
-            extended_gcsfs.invalidate_cache()
-            yield extended_gcsfs
-        finally:
-            _cleanup_gcs(extended_gcsfs, is_real_gcs)
+    extended_gcsfs = gcs_factory()
+    try:
+        # Only create/delete/populate the bucket if we are NOT using the real GCS endpoint
+        if not is_real_gcs:
+            try:
+                extended_gcsfs.rm(TEST_BUCKET, recursive=True)
+            except FileNotFoundError:
+                pass
+            extended_gcsfs.mkdir(TEST_BUCKET)
+            if populate:
+                extended_gcsfs.pipe(
+                    {TEST_BUCKET + "/" + k: v for k, v in allfiles.items()}
+                )
+        extended_gcsfs.invalidate_cache()
+        yield extended_gcsfs
+    finally:
+        _cleanup_gcs(extended_gcsfs, is_real_gcs)
 
 
 @pytest.fixture
