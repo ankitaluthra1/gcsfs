@@ -1,0 +1,13 @@
+Group          Bucket_Name                       Bucket_Type  Pattern  Threads  Num_Files  File_Size(MB)  Chunk_Size(MB)  Min(s)    Max(s)    Mean(s)   Rounds  Iters  P90(s)    P95(s)    P99(s)    Throughput(MB/s)
+READ_OBJECTS   jasha-test-bucket-gcsfs-hns-asia  hns          rand     1        1          1024           100             7.046439  7.046439  7.046439  1       1      7.046439  7.046439  7.046439  145.3216
+READ_OBJECTS   jasha-test-bucket-gcsfs-asia      regional     rand     1        1          1024           100             7.540912  7.540912  7.540912  1       1      7.540912  7.540912  7.540912  135.7925
+READ_OBJECTS   jasha-test-bucket-gcsfs-hns-asia  hns          seq      10       10         1024           100             41.66254  41.66254  41.66254  1       1      41.66254  41.66254  41.66254  245.7843
+READ_OBJECTS   jasha-test-bucket-gcsfs-asia      regional     seq      10       10         1024           100             45.69952  45.69952  45.69952  1       1      45.69952  45.69952  45.69952  224.0723
+READ_OBJECTS   jasha-test-bucket-gcsfs-hns-asia  hns          seq      1        1          1024           100             9.490007  9.490007  9.490007  1       1      9.490007  9.490007  9.490007  107.9029
+READ_OBJECTS   jasha-test-bucket-gcsfs-asia      regional     seq      1        1          1024           100             7.719479  7.719479  7.719479  1       1      7.719479  7.719479  7.719479  132.6514
+READ_OBJECTS   jasha-test-bucket-gcsfs-hns-asia  hns          rand     10       1          1024           100             4.356407  4.356407  4.356407  1       1      4.356407  4.356407  4.356407  235.0560
+READ_OBJECTS   jasha-test-bucket-gcsfs-asia      regional     rand     10       1          1024           100             4.227964  4.227964  4.227964  1       1      4.227964  4.227964  4.227964  242.1969
+WRITE_OBJECTS  jasha-test-bucket-gcsfs-hns-asia  hns          seq      10       10         1024           100             41.97418  41.97418  41.97418  1       1      41.97418  41.97418  41.97418  243.9594
+WRITE_OBJECTS  jasha-test-bucket-gcsfs-asia      regional     seq      10       10         1024           100             52.70479  52.70479  52.70479  1       1      52.70479  52.70479  52.70479  194.2897
+WRITE_OBJECTS  jasha-test-bucket-gcsfs-hns-asia  hns          seq      1        1          1024           100             9.340384  9.340384  9.340384  1       1      9.340384  9.340384  9.340384  109.6314
+WRITE_OBJECTS  jasha-test-bucket-gcsfs-asia      regional     seq      1        1          1024           100             8.858842  8.858842  8.858842  1       1      8.858842  8.858842  8.858842  115.5907

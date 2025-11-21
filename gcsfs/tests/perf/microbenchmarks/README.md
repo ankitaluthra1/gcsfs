@@ -20,31 +20,32 @@ The primary operations benchmarked are:
     gcloud auth application-default login
     ```
 
-## Tools Used
-
-- **pytest-benchmark**: A `pytest` fixture for benchmarking code. It handles the statistical analysis of timing results.
-- **jq**: A lightweight and flexible command-line JSON processor. The runner script uses `jq` to parse the raw JSON output from `pytest-benchmark` and generate a formatted summary table.
 
 ## How to Run the Benchmarks
 
 The main entry point is the `run_benchmarks.sh` script located in the parent `perf` directory. It reads the `benchmark_config.yaml` file to determine which scenarios to run.
+The main entry point is the `run_benchmarks.sh` script located in the `scripts` directory. It reads a YAML configuration file from the `configs` directory to determine which scenarios to run.
 
-All commands should be run from the `gcsfs/tests/perf` directory.
+All commands should be run from the `gcsfs/tests/perf/microbenchmarks` directory.
 
 1.  **Make the script executable** (only needs to be done once):
     ```bash
-    chmod +x run_benchmarks.sh execute_scenario.sh
+    chmod +x scripts/*.sh
     ```
 
 2.  **Execute the script**.
 
     To run all scenarios defined in `benchmark_config.yaml`:
     ```bash
-    ./run_benchmarks.sh
+    ./scripts/run_benchmarks.sh
     ```
     To run a single, specific scenario from the config file:
     ```bash
-    ./run_benchmarks.sh -s read_1gb_file_100mb_chunk
+    ./scripts/run_benchmarks.sh -s read_1gb_file_100mb_chunk
+    ```
+    To use a different configuration file (e.g., `my_config.yaml` located in the `configs` directory):
+    ```bash
+    ./scripts/run_benchmarks.sh -y my_config.yaml
     ```
 
 ## Output

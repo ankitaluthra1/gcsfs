@@ -3,14 +3,16 @@
 set -e
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-PROJECT_ROOT="$SCRIPT_DIR/../../../.."
-CONFIG_FILE="$SCRIPT_DIR/benchmark_config.yaml" # Assumes yq v3 syntax
+PROJECT_ROOT="$SCRIPT_DIR/../../../../.."
+CONFIG_DIR="$SCRIPT_DIR/../configs"
 TSV_OUTPUT="$PROJECT_ROOT/consolidated_benchmark_results.tsv"
 SCENARIO_NAME="" # Optional: a specific scenario name to run
+YAML_FILE="" # Mandatory: The YAML configuration file to use.
 
 function usage() {
-    echo "Usage: $0 [-s <scenario_name>]"
+    echo "Usage: $0 -y <yaml_file> [-s <scenario_name>]"
     echo "  -s: (Optional) The specific benchmark scenario name from benchmark_config.yaml to run."
+    echo "  -y: (Mandatory) The YAML configuration file to use. Assumed to be in the 'configs' directory."
     exit 1
 }
 
@@ -24,12 +26,36 @@ check_dependencies() {
         else echo "Could not find a supported package manager. Please install yq (v3) manually."; exit 1; fi
         if ! command -v yq &> /dev/null; then echo "yq installation failed."; exit 1; fi
     fi
+    # Check for jq (json parsing)
+    if ! command -v jq &> /dev/null; then
+        echo "jq not found. Attempting to install..."
+        if command -v apt-get &> /dev/null; then sudo apt-get update && sudo apt-get install -y jq;
+        elif command -v yum &> /dev/null; then sudo yum install -y jq;
+        elif command -v dnf &> /dev/null; then sudo dnf install -y jq;
+        else echo "Could not find a supported package manager. Please install jq manually."; exit 1; fi
+        if ! command -v jq &> /dev/null; then echo "jq installation failed."; exit 1; fi
+    fi
     echo "Dependencies are satisfied."
 }
 
 cleanup_previous_results() {
     echo "## Cleaning up previous results..."
     rm -f "$PROJECT_ROOT"/benchmark_results_*.json "$PROJECT_ROOT"/resource_stats_*.log "$TSV_OUTPUT"
+}
+
+parse_args() {
+    while getopts ":s:y:" opt; do
+        case ${opt} in
+            s) SCENARIO_NAME=$OPTARG ;;
+            y) YAML_FILE=$OPTARG ;;
+            \?) echo "Invalid Option: -$OPTARG" 1>&2; usage ;;
+        esac
+    done
+
+    if [ -z "$YAML_FILE" ]; then
+        echo "Error: YAML configuration file must be specified with -y."
+        usage
+    fi
 }
 
 load_common_config() {
@@ -55,6 +81,12 @@ run_scenario() {
     local name=$1
     echo -e "\n## Starting scenario: $name"
 
+    local CONFIG_FILE="$CONFIG_DIR/$YAML_FILE"
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo "Error: Configuration file not found at $CONFIG_FILE"
+        exit 1
+    fi
+
     # Fetch the full YAML object for the given scenario name
     local scenario_yaml=$(yq ".benchmarks[] | select(.name == \"$name\")" "$CONFIG_FILE")
     if [[ -z "$scenario_yaml" || "$scenario_yaml" == "null" ]]; then
@@ -67,33 +99,55 @@ run_scenario() {
     local file_size=$(echo "$scenario_yaml" | yq -r '.params.file_size')
     local chunk_size=$(echo "$scenario_yaml" | yq -r '.params.chunk_size')
     local depth=$(echo "$scenario_yaml" | yq -r '.params.depth')
-    local files_per_dir=$(echo "$scenario_yaml" | yq -r '.params.files_per_dir')
     local rounds=$(echo "$scenario_yaml" | yq -r '.params.rounds')
+    local pattern=$(echo "$scenario_yaml" | yq -r '.params.pattern')
+    local threads=$(echo "$scenario_yaml" | yq -r '.params.threads')
+    local scenario_bucket_types=$(echo "$scenario_yaml" | yq -r '.bucket_types[]' 2>/dev/null)
 
     # Build the command for the worker script
     local CMD=("$SCRIPT_DIR/execute_scenario.sh" -p "$PROJECT" -k "$group")
-
-    [ "$REGIONAL_BUCKET" != "null" ] && CMD+=(--regional-bucket "$REGIONAL_BUCKET")
-    [ "$HNS_BUCKET" != "null" ] && CMD+=(--hns-bucket "$HNS_BUCKET")
-    [ "$ZONAL_BUCKET" != "null" ] && CMD+=(--zonal-bucket "$ZONAL_BUCKET")
 
     [ "$num_files" != "null" ] && CMD+=(-n "$num_files")
     [ "$file_size" != "null" ] && CMD+=(-s "$file_size")
     [ "$chunk_size" != "null" ] && CMD+=(-c "$chunk_size")
     [ "$depth" != "null" ] && CMD+=(-d "$depth")
-    [ "$files_per_dir" != "null" ] && CMD+=(-f "$files_per_dir")
     [ "$rounds" != "null" ] && CMD+=(-r "$rounds")
+    [ "$pattern" != "null" ] && CMD+=(--pattern "$pattern")
+    [ "$threads" != "null" ] && CMD+=(--threads "$threads")
     [ "$PROFILE" = "yes" ] && CMD+=(--profile)
 
     CMD+=(--json-output-prefix "benchmark_results_${name//\"/}")
+    
+    declare -A available_buckets
+    [ -n "$REGIONAL_BUCKET" ] && available_buckets["regional"]=$REGIONAL_BUCKET
+    [ -n "$HNS_BUCKET" ] && available_buckets["hns"]=$HNS_BUCKET
+    [ -n "$ZONAL_BUCKET" ] && available_buckets["zonal"]=$ZONAL_BUCKET
 
-    # Execute the worker script
-    "${CMD[@]}"
+    for bucket_type in "${!available_buckets[@]}"; do
+        # If scenario_bucket_types is defined, check if the current bucket_type is in the list
+        if [ -n "$scenario_bucket_types" ] && ! echo "$scenario_bucket_types" | grep -q -w "$bucket_type"; then
+            echo "Skipping bucket type '$bucket_type' as it is not specified in the scenario's bucket_types."
+            continue
+        fi
+
+        local bucket_name="${available_buckets[$bucket_type]}"
+        if [ -z "$bucket_name" ] || [ "$bucket_name" == "null" ]; then
+            echo "Skipping bucket type '$bucket_type' as no bucket name is configured in common.buckets."
+            continue
+        fi
+
+        local scenario_cmd=("${CMD[@]}")
+        scenario_cmd+=(--bucket-name "$bucket_name")
+        scenario_cmd+=(--bucket-type "$bucket_type")
+
+        # Execute the worker script for this specific scenario and bucket
+        "${scenario_cmd[@]}"
+    done
 }
 
 process_results() {
     echo -e "\n## All scenarios complete. Consolidating results..."
-    local HEADER="Group\tBucket_Name\tBucket_Type\tNum_Files\tFile_Size(MB)\tChunk_Size(MB)\tMin(s)\tMax(s)\tMean(s)\tRounds\tIters\tP90(s)\tP95(s)\tP99(s)\tThroughput(MB/s)"
+    local HEADER="Group\tBucket_Name\tBucket_Type\tPattern\tThreads\tNum_Files\tFile_Size(MB)\tChunk_Size(MB)\tMin(s)\tMax(s)\tMean(s)\tRounds\tIters\tP90(s)\tP95(s)\tP99(s)\tThroughput(MB/s)"
 
     # Check if any result files were created
     if ! ls "$PROJECT_ROOT"/benchmark_results_*.json 1> /dev/null 2>&1; then
@@ -120,6 +174,8 @@ process_results() {
     .group,
     .extra_info.bucket_name,
     .extra_info.bucket_type,
+    (if .extra_info.pattern then .extra_info.pattern else "N/A" end),
+    (if .extra_info.threads then .extra_info.threads else 1 end),
     .extra_info.num_files,
     (.extra_info.file_size / (1024*1024)),
     (if .extra_info.chunk_size then (.extra_info.chunk_size / (1024*1024)) else "N/A" end),
@@ -147,12 +203,17 @@ process_results() {
 }
 
 main() {
-    [ "$1" = "-s" ] && [ -n "$2" ] && SCENARIO_NAME=$2
-
+    parse_args "$@"
     echo "--- GCSFS Benchmark Orchestrator ---"
     
     check_dependencies
     cleanup_previous_results
+
+    export CONFIG_FILE="$CONFIG_DIR/$YAML_FILE"
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo "Error: Config file '$YAML_FILE' not found in '$CONFIG_DIR'." && exit 1
+    fi
+
     load_common_config
 
     # Get all available benchmark names from the config file
