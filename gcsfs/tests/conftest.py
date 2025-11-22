@@ -12,7 +12,7 @@ import pytest
 import requests
 
 from gcsfs import GCSFileSystem
-from gcsfs.tests.settings import TEST_BUCKET
+from gcsfs.tests.settings import TEST_BUCKET, TEST_VERSIONED_BUCKET
 
 files = {
     "test/accounts.1.json": (
@@ -187,25 +187,25 @@ def gcs_versioned(gcs_factory):
         if is_real_gcs:
             # For real GCS, we assume the bucket exists and only clean its contents.
             try:
-                cleanup_versioned_bucket(gcs, TEST_BUCKET)
+                cleanup_versioned_bucket(gcs, TEST_VERSIONED_BUCKET)
             except Exception as e:
-                logging.warning(f"Failed to empty versioned bucket {TEST_BUCKET}: {e}")
-            # Allow time for eventual consistency on real GCS after cleanup
-            time.sleep(3)
+                logging.warning(
+                    f"Failed to empty versioned bucket {TEST_VERSIONED_BUCKET}: {e}"
+                )
         else:
             # For emulators, we delete and recreate the bucket for a clean state.
             try:
-                gcs.rm(TEST_BUCKET, recursive=True)
+                gcs.rm(TEST_VERSIONED_BUCKET, recursive=True)
             except FileNotFoundError:
                 pass
-            gcs.mkdir(TEST_BUCKET, enable_versioning=True)
+            gcs.mkdir(TEST_VERSIONED_BUCKET, enable_versioning=True)
         gcs.invalidate_cache()
         yield gcs
     finally:
         try:
-            if not is_real_gcs: 
-                gcs.rm(gcs.find(TEST_BUCKET, versions=True))
-                gcs.rm(TEST_BUCKET)
+            if not is_real_gcs:
+                gcs.rm(gcs.find(TEST_VERSIONED_BUCKET, versions=True))
+                gcs.rm(TEST_VERSIONED_BUCKET)
         except:  # noqa: E722
             pass
 
@@ -216,16 +216,16 @@ def cleanup_versioned_bucket(gcs, bucket_name, prefix=None):
     ensuring it uses the same credentials as the gcsfs instance.
     """
     client = storage.Client(credentials=gcs.credentials.credentials, project=gcs.project)
+
+    # List all blobs, including old versions
     blobs_to_delete = list(client.list_blobs(bucket_name, versions=True, prefix=prefix))
 
     if not blobs_to_delete:
         print("No objects to delete.")
         return
 
-    # The batch API has a limit of 1000 requests per batch.
-    for i in range(0, len(blobs_to_delete), 800):
-        with client.batch():
-            for blob in blobs_to_delete[i : i + 800]:
-                blob.delete()
+    with client.batch():
+        for blob in blobs_to_delete:
+            blob.delete()
 
     print(f"Batch deleted {len(blobs_to_delete)} objects (all versions).")

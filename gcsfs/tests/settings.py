@@ -1,6 +1,7 @@
 import os
 
 TEST_BUCKET = os.getenv("GCSFS_TEST_BUCKET", "gcsfs_test")
+TEST_VERSIONED_BUCKET = os.getenv("GCSFS_TEST_VERSIONED_BUCKET", "gcsfs_test_versioned")
 TEST_PROJECT = os.getenv("GCSFS_TEST_PROJECT", "project")
 TEST_REQUESTER_PAYS_BUCKET = f"{TEST_BUCKET}-req-pay"
 TEST_KMS_KEY = os.getenv(
