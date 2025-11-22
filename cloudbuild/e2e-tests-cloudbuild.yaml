@@ -108,11 +108,11 @@ steps:
           echo '--- Preparing test environment on VM ---'
           export GCSFS_TEST_BUCKET='gcsfs-test-standard-${_SHORT_BUILD_ID}'
           export GCSFS_TEST_VERSIONED_BUCKET='gcsfs-test-versioned-${_SHORT_BUILD_ID}'
-          
+
           export STORAGE_EMULATOR_HOST=https://storage.googleapis.com
           export GCSFS_TEST_PROJECT=${PROJECT_ID}
           export GCSFS_TEST_KMS_KEY=projects/${PROJECT_ID}/locations/${_REGION}/keyRings/${_GCSFS_KEY_RING_NAME}/cryptoKeys/${_GCSFS_KEY_NAME}
-          
+
           echo '--- Running pytest on VM ---'
           pytest -vv -s \
           --log-format='%(asctime)s %(levelname)s %(message)s' \

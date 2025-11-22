@@ -1,7 +1,8 @@
-import fsspec
-import pytest
 import logging
 import os
+
+import fsspec
+import pytest
 from fsspec.tests.abstract import AbstractFixtures
 
 from gcsfs.core import GCSFileSystem

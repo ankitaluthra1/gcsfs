@@ -1,5 +1,5 @@
-import posixpath
 import os
+import posixpath
 
 import pytest
 from google.cloud import storage
@@ -21,16 +21,26 @@ def is_versioning_enabled():
         return True, ""
     try:
         gcs = GCSFileSystem(project=os.getenv("GCSFS_TEST_PROJECT", "project"))
-        client = storage.Client(credentials=gcs.credentials.credentials, project=gcs.project)
+        client = storage.Client(
+            credentials=gcs.credentials.credentials, project=gcs.project
+        )
         bucket = client.get_bucket(TEST_VERSIONED_BUCKET)
         if bucket.versioning_enabled:
             return True, ""
-        return False, f"Bucket '{TEST_VERSIONED_BUCKET}' does not have versioning enabled."
+        return (
+            False,
+            f"Bucket '{TEST_VERSIONED_BUCKET}' does not have versioning enabled.",
+        )
     except Exception as e:
-        return False, f"Could not verify versioning status for bucket '{TEST_VERSIONED_BUCKET}': {e}"
+        return (
+            False,
+            f"Could not verify versioning status for bucket '{TEST_VERSIONED_BUCKET}': {e}",
+        )
 
 
-pytestmark = pytest.mark.skipif(not is_versioning_enabled()[0], reason=is_versioning_enabled()[1])
+pytestmark = pytest.mark.skipif(
+    not is_versioning_enabled()[0], reason=is_versioning_enabled()[1]
+)
 
 
 def test_info_versioned(gcs_versioned):
@@ -83,6 +93,7 @@ def test_ls_versioned(gcs_versioned):
     assert gcs_versioned.ls(TEST_VERSIONED_BUCKET, versions=True) == [
         f"{TEST_VERSIONED_BUCKET}/tmp"
     ]
+
 
 def test_find_versioned(gcs_versioned):
     with gcs_versioned.open(a, "wb") as wo:

@@ -5,11 +5,11 @@ import subprocess
 import time
 from contextlib import nullcontext
 from unittest.mock import patch
-from google.cloud import storage
 
 import fsspec
 import pytest
 import requests
+from google.cloud import storage
 
 from gcsfs import GCSFileSystem
 from gcsfs.tests.settings import TEST_BUCKET, TEST_VERSIONED_BUCKET
@@ -108,7 +108,7 @@ def gcs(gcs_factory, populate=True):
         os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
     )
     gcs = gcs_factory()
-    try:        # ensure we're empty.
+    try:  # ensure we're empty.
         if is_real_gcs:
             # For real GCS, we assume the bucket exists and only clean its contents.
             try:
@@ -183,7 +183,7 @@ def gcs_versioned(gcs_factory):
     is_real_gcs = (
         os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
     )
-    try:        # ensure we're empty.
+    try:  # ensure we're empty.
         if is_real_gcs:
             # For real GCS, we assume the bucket exists and only clean its contents.
             try:
@@ -215,7 +215,9 @@ def cleanup_versioned_bucket(gcs, bucket_name, prefix=None):
     Deletes all object versions in a bucket using the google-cloud-storage client,
     ensuring it uses the same credentials as the gcsfs instance.
     """
-    client = storage.Client(credentials=gcs.credentials.credentials, project=gcs.project)
+    client = storage.Client(
+        credentials=gcs.credentials.credentials, project=gcs.project
+    )
 
     # List all blobs, including old versions
     blobs_to_delete = list(client.list_blobs(bucket_name, versions=True, prefix=prefix))

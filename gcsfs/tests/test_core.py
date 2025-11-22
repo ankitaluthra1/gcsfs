@@ -1391,6 +1391,7 @@ def test_deep_find_wthdirs(gcs):
         f"{TEST_BUCKET}/deep/nested/dir",
     ]
 
+
 def test_cp_directory_recursive(gcs):
     src = TEST_BUCKET + "/src"
     src_file = src + "/file"
