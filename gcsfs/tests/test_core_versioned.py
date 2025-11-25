@@ -57,13 +57,13 @@ def test_info_versioned(gcs_versioned):
 
 
 def test_cat_versioned(gcs_versioned):
-    with gcs_versioned.open(a, "wb") as wo:
+    with gcs_versioned.open(b, "wb") as wo:
         wo.write(b"v1")
-    v1 = gcs_versioned.info(a)["generation"]
+    v1 = gcs_versioned.info(b)["generation"]
     assert v1 is not None
-    with gcs_versioned.open(a, "wb") as wo:
+    with gcs_versioned.open(b, "wb") as wo:
         wo.write(b"v2")
-    assert gcs_versioned.cat(f"{a}#{v1}") == b"v1"
+    assert gcs_versioned.cat(f"{b}#{v1}") == b"v1"
 
 
 def test_cp_versioned(gcs_versioned):
@@ -78,14 +78,14 @@ def test_cp_versioned(gcs_versioned):
 
 
 def test_ls_versioned(gcs_versioned):
-    with gcs_versioned.open(a, "wb") as wo:
+    with gcs_versioned.open(b, "wb") as wo:
         wo.write(b"v1")
-    v1 = gcs_versioned.info(a)["generation"]
-    with gcs_versioned.open(a, "wb") as wo:
+    v1 = gcs_versioned.info(b)["generation"]
+    with gcs_versioned.open(b, "wb") as wo:
         wo.write(b"v2")
-    v2 = gcs_versioned.info(a)["generation"]
-    dpath = posixpath.dirname(a)
-    versions = {f"{a}#{v1}", f"{a}#{v2}"}
+    v2 = gcs_versioned.info(b)["generation"]
+    dpath = posixpath.dirname(b)
+    versions = {f"{b}#{v1}", f"{b}#{v2}"}
     assert versions == set(gcs_versioned.ls(dpath, versions=True))
     assert versions == {
         entry["name"] for entry in gcs_versioned.ls(dpath, detail=True, versions=True)

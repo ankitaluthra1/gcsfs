@@ -240,8 +240,8 @@ def cleanup_versioned_bucket(gcs, bucket_name, prefix=None):
     logging.info(
         "Deleting %d object versions from %s.", len(blobs_to_delete), bucket_name
     )
-    with client.batch():
-        for blob in blobs_to_delete:
-            blob.delete(retry=retry_policy)
+    time.sleep(2)
+    for blob in blobs_to_delete:
+        blob.delete(retry=retry_policy)
 
     logging.info("Successfully deleted %d object versions.", len(blobs_to_delete))
