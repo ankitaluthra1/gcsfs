@@ -215,6 +215,17 @@ def cleanup_versioned_bucket(gcs, bucket_name, prefix=None):
     Deletes all object versions in a bucket using the google-cloud-storage client,
     ensuring it uses the same credentials as the gcsfs instance.
     """
+    # Define a retry policy for API calls to handle rate limiting.
+    # This can retry on 429 Too Many Requests errors, which can happen
+    # when deleting many object versions quickly.
+    from google.api_core.retry import Retry
+
+    retry_policy = Retry(
+        initial=1.0,  # Initial delay in seconds
+        maximum=30.0,  # Maximum delay in seconds
+        multiplier=1.2,  # Backoff factor
+    )
+
     client = storage.Client(
         credentials=gcs.credentials.credentials, project=gcs.project
     )
@@ -223,11 +234,14 @@ def cleanup_versioned_bucket(gcs, bucket_name, prefix=None):
     blobs_to_delete = list(client.list_blobs(bucket_name, versions=True, prefix=prefix))
 
     if not blobs_to_delete:
-        print("No objects to delete.")
+        logging.info("No object versions to delete in %s.", bucket_name)
         return
 
+    logging.info(
+        "Deleting %d object versions from %s.", len(blobs_to_delete), bucket_name
+    )
     with client.batch():
         for blob in blobs_to_delete:
-            blob.delete()
+            blob.delete(retry=retry_policy)
 
-    print(f"Batch deleted {len(blobs_to_delete)} objects (all versions).")
+    logging.info("Successfully deleted %d object versions.", len(blobs_to_delete))
