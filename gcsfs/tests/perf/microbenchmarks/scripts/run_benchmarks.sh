@@ -141,7 +141,7 @@ run_scenario() {
         scenario_cmd+=(--bucket-type "$bucket_type")
 
         # Execute the worker script for this specific scenario and bucket
-        "${scenario_cmd[@]}"
+        "${scenario_cmd[@]}"        
     done
 }
 

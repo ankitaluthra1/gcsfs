@@ -2,8 +2,16 @@ import logging
 import os
 import uuid
 
+# The order of these imports is critical.
+# `import gcsfs` must come before `import fsspec` to ensure that the logic
+# in `gcsfs/__init__.py` runs first. This allows gcsfs to check the
+# GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT environment variable and patch the
+# GCSFileSystem class before fsspec discovers and caches the implementation.
+import gcsfs
 import fsspec
 import pytest
+from gcsfs import GCSFileSystem
+
 
 # Configure logging
 logging.basicConfig(
@@ -27,8 +35,8 @@ CHUNK_SIZE_BYTES = min(CHUNK_SIZE_BYTES, FILE_SIZE_BYTES)
 DEPTH = int(os.environ.get("GCSFS_BENCH_DEPTH", 1))
 
 BUCKET_NAME = os.environ.get("GCSFS_BENCH_BUCKET", "")
-PROJECT_ID = os.environ.get("GCSFS_BENCH_PROJECT", "")
 BUCKET_TYPE = os.environ.get("GCSFS_BENCH_BUCKET_TYPE", "regional")
+GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT = os.environ.get("GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT", "false")
 
 # --- Benchmark Execution Constants ---
 BENCHMARK_ROUNDS = int(os.environ.get("GCSFS_BENCH_ROUNDS", 10))
@@ -37,24 +45,18 @@ BENCHMARK_WARMUP_ROUNDS = int(os.environ.get("GCSFS_BENCH_WARMUP", 1))
 # Create combinations of (num_files, file_size)
 benchmark_params = [(NUM_FILES, FILE_SIZE_BYTES)]
 
-
-def get_gcs_filesystem(project):
-    """Creates and returns a GCSFileSystem instance."""
-    # In a CI environment, we use the service account associated with the VM.
-    # For local debugging, we use the user's default gcloud credentials.
-    if os.environ.get("CI"):
-        # The 'project' argument is used to select the correct project when
-        # service account credentials are available.
-        return fsspec.filesystem("gcs", project=project)
-
-    # For local runs, 'google_default' uses credentials from
-    # `gcloud auth application-default login`.
-    return fsspec.filesystem("gcs", token="google_default")
-
+@pytest.fixture(scope="function")
+def gcs_filesystem_factory():
+    """Returns a factory that creates a new GCSFileSystem instance."""
+    def factory(**kwargs):
+        logging.info(f"Creating new GCSFileSystem instance for '{BUCKET_TYPE}', with EXPERIMENTAL_ZB_HNS_SUPPORT='{GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT}'.")
+        GCSFileSystem.clear_instance_cache()
+        return fsspec.filesystem("gcs", **kwargs)
+    return factory
 
 
 @pytest.fixture(scope="function")
-def gcs_benchmark_fixture(request):
+def gcs_benchmark_fixture(request, gcs_filesystem_factory):
     """
     A generic fixture that sets up and tears down the benchmarking environment.
     - For 'read' and 'write' benchmarks, it creates flat files with a specified size.
@@ -62,19 +64,20 @@ def gcs_benchmark_fixture(request):
     - For zonal buckets, we only add single object for now, this code will be removed once GCSFS has ZB write functionality
     """
     num_files = NUM_FILES
-    file_size_bytes = FILE_SIZE_BYTES if BENCHMARK_GROUP in ["read", "write"] else 0
+    file_size_bytes = FILE_SIZE_BYTES if BENCHMARK_GROUP in ['read', 'write'] else 0
+
+    gcs = gcs_filesystem_factory()
 
     if BUCKET_TYPE == "zonal":
         logging.info("Zonal benchmark detected. Reusing pre-created file.")
         zonal_file_prefix = os.environ.get("GCSFS_BENCH_ZONAL_FILE_PATH")
         if not zonal_file_prefix:
             pytest.fail("GCSFS_BENCH_ZONAL_FILE_PATH env var not set for zonal benchmark.")
-        
+
         # Reconstruct file paths based on the prefix and NUM_FILES
         base_path = zonal_file_prefix.replace("gs://", "")
         file_paths = [f"{base_path}-{i}" for i in range(1, NUM_FILES + 1)]
 
-        gcs = get_gcs_filesystem(PROJECT_ID)
         yield gcs, file_paths, b"", num_files, file_size_bytes
         return
 
@@ -82,7 +85,6 @@ def gcs_benchmark_fixture(request):
         f"Setting up '{BENCHMARK_GROUP}' benchmark: {num_files} files, "
         f"{file_size_bytes // 1024 // 1024}MB each."
     )
-    gcs = get_gcs_filesystem(PROJECT_ID)
 
     # Setup: Create files based on benchmark type
     file_paths = [f"{BUCKET_NAME}/{uuid.uuid4()}" for _ in range(num_files)]

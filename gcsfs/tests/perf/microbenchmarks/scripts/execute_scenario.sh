@@ -104,33 +104,16 @@ run_zonal_benchmark() {
     local current_test_pattern="read"
 
     echo -e "\n--- Running benchmarks for ${bucket_type} bucket: ${bucket_name} (Pattern: '${current_test_pattern}') ---"
-    echo "Setting up ${NUM_FILES} file(s) for ${bucket_type} benchmark using gcloud..."
-    echo "Updating gcloud components and enabling ${bucket_type} Bucket streaming..."
-    gcloud components update --quiet
-    gcloud config set storage/enable_zonal_buckets_bidi_streaming True
 
-    echo "Creating a local ${FILE_SIZE_MB}MB file with random data..."
-    dd if=/dev/urandom of=temp_file_for_upload bs=1M count=${FILE_SIZE_MB} iflag=fullblock status=none
-
-    local zonal_file_prefix="zonal-file-bench-$(uuidgen)"
+    local zonal_file_prefix="zonal-file-bench"
     export GCSFS_BENCH_ZONAL_FILE_PATH="gs://${bucket_name}/${zonal_file_prefix}"
 
-    for i in $(seq 1 $NUM_FILES); do
-        gcloud storage cp temp_file_for_upload "${GCSFS_BENCH_ZONAL_FILE_PATH}-${i}" --quiet
-    done
-
-    rm "temp_file_for_upload"
     echo "Zonal setup complete."
 
-    export GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT=true
     pytest_args+=("-k" "$current_test_pattern")
 
     run_pytest_with_monitoring "$bucket_type" "${pytest_args[@]}"
-    unset GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT
     unset GCSFS_BENCH_ZONAL_FILE_PATH
-
-    echo "Cleaning up zonal benchmark files..."
-    gcloud storage rm "gs://${bucket_name}/${zonal_file_prefix}-*" --quiet
 }
 
 run_standard_benchmark() {
