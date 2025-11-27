@@ -19,7 +19,7 @@ steps:
         gcloud compute instances create gcsfs-perf-test-vm-${_SHORT_BUILD_ID} \
           --project=${PROJECT_ID} \
           --zone=${_ZONE} \
-          --machine-type=e2-medium \
+          --machine-type=e2-custom-24-98304 \
           --image-family=debian-11 \
           --image-project=debian-cloud \
           --service-account=${_VM_SERVICE_ACCOUNT} \
