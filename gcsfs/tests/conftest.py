@@ -104,39 +104,29 @@ def gcs_factory(docker_gcs):
 
 @pytest.fixture
 def gcs(gcs_factory, populate=True):
-    is_real_gcs = (
-        os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
-    )
     gcs = gcs_factory()
     try:  # ensure we're empty.
-        if is_real_gcs:
-            # For real GCS, we assume the bucket exists and only clean its contents.
+        # Create the bucket if it doesn't exist, otherwise clean it.
+        if not gcs.exists(TEST_BUCKET):
+            gcs.mkdir(TEST_BUCKET)
+        else:
             try:
                 gcs.rm(gcs.find(TEST_BUCKET))
             except Exception as e:
                 logging.warning(f"Failed to empty bucket {TEST_BUCKET}: {e}")
-        else:
-            # For emulators, we delete and recreate the bucket for a clean state.
-            try:
-                gcs.rm(TEST_BUCKET, recursive=True)
-            except FileNotFoundError:
-                pass
-            gcs.mkdir(TEST_BUCKET)
 
         if populate:
             gcs.pipe({TEST_BUCKET + "/" + k: v for k, v in allfiles.items()})
         gcs.invalidate_cache()
         yield gcs
     finally:
-        _cleanup_gcs(gcs, is_real_gcs)
+        _cleanup_gcs(gcs)
 
 
-def _cleanup_gcs(gcs, is_real_gcs):
-    """Only remove the bucket/contents if we are NOT using the real GCS, logging a warning on failure."""
-    if is_real_gcs:
-        return
+def _cleanup_gcs(gcs):
+    """Clean the bucket contents, logging a warning on failure."""
     try:
-        gcs.rm(TEST_BUCKET, recursive=True)
+        gcs.rm(gcs.find(TEST_BUCKET))
     except Exception as e:
         logging.warning(f"Failed to clean up GCS bucket {TEST_BUCKET}: {e}")
 
@@ -173,7 +163,7 @@ def extended_gcsfs(gcs_factory, populate=True):
             extended_gcsfs.invalidate_cache()
             yield extended_gcsfs
         finally:
-            _cleanup_gcs(extended_gcsfs, is_real_gcs)
+            _cleanup_gcs(extended_gcsfs)
 
 
 @pytest.fixture
@@ -185,13 +175,16 @@ def gcs_versioned(gcs_factory):
     )
     try:  # ensure we're empty.
         if is_real_gcs:
-            # For real GCS, we assume the bucket exists and only clean its contents.
-            try:
-                cleanup_versioned_bucket(gcs, TEST_VERSIONED_BUCKET)
-            except Exception as e:
-                logging.warning(
-                    f"Failed to empty versioned bucket {TEST_VERSIONED_BUCKET}: {e}"
-                )
+            # For real GCS, create the bucket if it doesn't exist, otherwise clean it.
+            if not gcs.exists(TEST_VERSIONED_BUCKET):
+                gcs.mkdir(TEST_VERSIONED_BUCKET, enable_versioning=True)
+            else:
+                try:
+                    cleanup_versioned_bucket(gcs, TEST_VERSIONED_BUCKET)
+                except Exception as e:
+                    logging.warning(
+                        f"Failed to empty versioned bucket {TEST_VERSIONED_BUCKET}: {e}"
+                    )
         else:
             # For emulators, we delete and recreate the bucket for a clean state.
             try:
