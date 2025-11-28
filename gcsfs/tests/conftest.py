@@ -221,34 +221,39 @@ def gcs_versioned(gcs_factory, buckets_to_delete):
         os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
     )
     try:  # ensure we're empty.
+        # The versioned bucket might be created by `is_versioning_enabled`
+        # in test_core_versioned.py. We must register it for cleanup only if
+        # it was created by this test run.
+        try:
+            from gcsfs.tests.test_core_versioned import (
+                _VERSIONED_BUCKET_CREATED_BY_TESTS,
+            )
+
+            if _VERSIONED_BUCKET_CREATED_BY_TESTS:
+                buckets_to_delete.add(TEST_VERSIONED_BUCKET)
+        except ImportError:
+            pass  # test_core_versioned is not being run
         if is_real_gcs:
-            # For real GCS, create the bucket if it doesn't exist, otherwise clean it.
-            if not gcs.exists(TEST_VERSIONED_BUCKET):
-                gcs.mkdir(TEST_VERSIONED_BUCKET, enable_versioning=True)
-            else:
-                try:
-                    cleanup_versioned_bucket(gcs, TEST_VERSIONED_BUCKET)
-                except Exception as e:
-                    logging.warning(
-                        f"Failed to empty versioned bucket {TEST_VERSIONED_BUCKET}: {e}"
-                    )
+            cleanup_versioned_bucket(gcs, TEST_VERSIONED_BUCKET)
         else:
-            # For emulators, we delete and recreate the bucket for a clean state.
+            # For emulators, we delete and recreate the bucket for a clean state
             try:
                 gcs.rm(TEST_VERSIONED_BUCKET, recursive=True)
             except FileNotFoundError:
                 pass
             gcs.mkdir(TEST_VERSIONED_BUCKET, enable_versioning=True)
-        buckets_to_delete.add(TEST_VERSIONED_BUCKET)
+            buckets_to_delete.add(TEST_VERSIONED_BUCKET)
         gcs.invalidate_cache()
         yield gcs
     finally:
+        # Ensure the bucket is empty after the test.
         try:
-            if not is_real_gcs:
-                gcs.rm(gcs.find(TEST_VERSIONED_BUCKET, versions=True))
-                gcs.rm(TEST_VERSIONED_BUCKET)
-        except:  # noqa: E722
-            pass
+            if is_real_gcs:
+                cleanup_versioned_bucket(gcs, TEST_VERSIONED_BUCKET)
+        except Exception as e:
+            logging.warning(
+                f"Failed to clean up versioned bucket {TEST_VERSIONED_BUCKET} after test: {e}"
+            )
 
 
 def cleanup_versioned_bucket(gcs, bucket_name, prefix=None):
