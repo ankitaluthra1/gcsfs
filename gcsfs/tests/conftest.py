@@ -143,7 +143,9 @@ def final_cleanup(gcs_factory, buckets_to_delete):
     """A session-scoped fixture to delete the test buckets after all tests are run."""
     yield
     # This code runs after the entire test session finishes
-    use_extended_gcs = os.getenv("GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT", "false").lower() in (
+    use_extended_gcs = os.getenv(
+        "GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT", "false"
+    ).lower() in (
         "true",
         "1",
     )
