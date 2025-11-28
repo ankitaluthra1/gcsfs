@@ -143,16 +143,36 @@ def final_cleanup(gcs_factory, buckets_to_delete):
     """A session-scoped fixture to delete the test buckets after all tests are run."""
     yield
     # This code runs after the entire test session finishes
-    gcs = gcs_factory()
-    for bucket in buckets_to_delete:
-        # For real GCS, only delete if created by the test suite.
-        # For emulators, always delete.
-        try:
-            if gcs.exists(bucket):
-                gcs.rm(bucket, recursive=True)
-                logging.info(f"Cleaned up bucket: {bucket}")
-        except Exception as e:
-            logging.warning(f"Failed to perform final cleanup for bucket {bucket}: {e}")
+    use_extended_gcs = os.getenv("GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT", "false").lower() in (
+        "true",
+        "1",
+    )
+
+    if use_extended_gcs:
+        is_real_gcs = (
+            os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
+        )
+        mock_authentication_manager = (
+            patch("google.auth.default", return_value=(None, "fake-project"))
+            if not is_real_gcs
+            else nullcontext()
+        )
+    else:
+        mock_authentication_manager = nullcontext()
+
+    with mock_authentication_manager:
+        gcs = gcs_factory()
+        for bucket in buckets_to_delete:
+            # For real GCS, only delete if created by the test suite.
+            # For emulators, always delete.
+            try:
+                if gcs.exists(bucket):
+                    gcs.rm(bucket, recursive=True)
+                    logging.info(f"Cleaned up bucket: {bucket}")
+            except Exception as e:
+                logging.warning(
+                    f"Failed to perform final cleanup for bucket {bucket}: {e}"
+                )
 
 
 @pytest.fixture
