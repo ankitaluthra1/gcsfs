@@ -21,6 +21,10 @@ def is_versioning_enabled():
         return True, ""
     try:
         gcs = GCSFileSystem(project=os.getenv("GCSFS_TEST_PROJECT", "project"))
+        if not gcs.exists(TEST_VERSIONED_BUCKET):
+            gcs.mkdir(TEST_VERSIONED_BUCKET, enable_versioning=True)
+
+        # Verify versioning is enabled using the storage client
         client = storage.Client(
             credentials=gcs.credentials.credentials, project=gcs.project
         )
