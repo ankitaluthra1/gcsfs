@@ -12,7 +12,7 @@ import requests
 from google.cloud import storage
 
 from gcsfs import GCSFileSystem
-from gcsfs.tests.settings import TEST_BUCKET, TEST_VERSIONED_BUCKET
+from gcsfs.tests.settings import TEST_BUCKET, TEST_VERSIONED_BUCKET, TEST_ZONAL_BUCKET
 
 files = {
     "test/accounts.1.json": (
@@ -198,14 +198,14 @@ def extended_gcsfs(gcs_factory, buckets_to_delete, populate=True):
             # Only create/delete/populate the bucket if we are NOT using the real GCS endpoint
             if not is_real_gcs:
                 try:
-                    extended_gcsfs.rm(TEST_BUCKET, recursive=True)
+                    extended_gcsfs.rm(TEST_ZONAL_BUCKET, recursive=True)
                 except FileNotFoundError:
                     pass
-                extended_gcsfs.mkdir(TEST_BUCKET)
-                buckets_to_delete.add(TEST_BUCKET)
+                extended_gcsfs.mkdir(TEST_ZONAL_BUCKET)
+                buckets_to_delete.add(TEST_ZONAL_BUCKET)
                 if populate:
                     extended_gcsfs.pipe(
-                        {TEST_BUCKET + "/" + k: v for k, v in allfiles.items()}
+                        {TEST_ZONAL_BUCKET + "/" + k: v for k, v in allfiles.items()}
                     )
             extended_gcsfs.invalidate_cache()
             yield extended_gcsfs
