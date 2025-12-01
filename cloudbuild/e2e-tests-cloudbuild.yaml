@@ -91,7 +91,7 @@ steps:
           sudo apt-get install -y git python3-pip python3-venv fuse fuse3 libfuse2 > /dev/null
 
           # Clone the repository and checkout the specific commit from the build trigger.
-          git clone https://github.com/ankitaluthra1/gcsfs.git
+          git clone https://github.com/${_REPO_OWNER}/gcsfs.git
           cd gcsfs
           git checkout ${COMMIT_SHA}
 
