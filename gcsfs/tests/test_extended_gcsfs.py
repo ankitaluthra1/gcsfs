@@ -154,9 +154,7 @@ def test_read_small_zb(extended_gcsfs, zonal_mocks):
             # cache drop
             assert len(f.cache.cache) < len(out)
             if mocks:
-                mocks["get_bucket_type"].assert_called_once_with(
-                    TEST_ZONAL_BUCKET
-                )
+                mocks["get_bucket_type"].assert_called_once_with(TEST_ZONAL_BUCKET)
 
 
 def test_readline_zb(extended_gcsfs, zonal_mocks):

@@ -1,5 +1,6 @@
 """Tests for ZonalFile write operations."""
 
+import os
 from unittest import mock
 
 import pytest
@@ -9,6 +10,17 @@ from gcsfs.tests.settings import TEST_BUCKET
 
 file_path = f"{TEST_BUCKET}/zonal-file-test"
 test_data = b"hello world"
+
+REQUIRED_ENV_VAR = "GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT"
+
+# If the condition is True, only then tests in this file are run.
+should_run = os.getenv(REQUIRED_ENV_VAR, "false").lower() in (
+    "true",
+    "1",
+)
+pytestmark = pytest.mark.skipif(
+    not should_run, reason=f"Skipping tests: {REQUIRED_ENV_VAR} env variable is not set"
+)
 
 
 @pytest.fixture
