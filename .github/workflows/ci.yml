@@ -42,10 +42,7 @@ jobs:
           pytest -vv -s \
           --log-format="%(asctime)s %(levelname)s %(message)s" \
           --log-date-format="%H:%M:%S" \
-          gcsfs/ \
-          --ignore=gcsfs/tests/test_extended_gcsfs.py \
-          --ignore=gcsfs/tests/test_zonal_file.py
-
+          gcsfs/
       - name: Run Extended Tests
         run: |
           pip install "git+https://github.com/googleapis/python-storage@main#egg=google-cloud-storage" --force-reinstall --no-cache-dir --upgrade
