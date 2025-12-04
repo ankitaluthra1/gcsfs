@@ -44,6 +44,7 @@ jobs:
           gcsfs/
       - name: Run Extended Tests
         run: |
+          pip install --force-reinstall --no-cache-dir git+https://github.com/googleapis/python-storage.git@main#egg=google-cloud-storage
           export GOOGLE_APPLICATION_CREDENTIALS=$(pwd)/gcsfs/tests/fake-secret.json
           export GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT="true"
           pytest -vv -s \
