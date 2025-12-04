@@ -104,7 +104,15 @@ def gcs_factory(docker_gcs):
 
 @pytest.fixture(scope="session")
 def buckets_to_delete():
-    """A set to keep track of buckets created during the test session."""
+    """
+    Provides a session-scoped set to track the names of GCS buckets that are
+    created by the test suite.
+
+    When tests run, they may create new GCS buckets. If these buckets are not
+    deleted, they will persist after the test run, leading to resource leakage.
+    This set acts as a registry of buckets that the `final_cleanup` fixture
+    should remove at the end of the entire test session.
+    """
     return set()
 
 
@@ -115,6 +123,11 @@ def gcs(gcs_factory, buckets_to_delete, populate=True):
         # Create the bucket if it doesn't exist, otherwise clean it.
         if not gcs.exists(TEST_BUCKET):
             gcs.mkdir(TEST_BUCKET)
+            # By adding the bucket name to this set, we are marking it for
+            # deletion at the end of the test session. This ensures that if
+            # the test suite creates the bucket, it will also be responsible
+            # for deleting it. If the bucket already existed, we assume it's
+            # managed externally and should not be deleted by the tests.
             buckets_to_delete.add(TEST_BUCKET)
         else:
             try:
@@ -140,7 +153,10 @@ def _cleanup_gcs(gcs):
 
 @pytest.fixture(scope="session", autouse=True)
 def final_cleanup(gcs_factory, buckets_to_delete):
-    """A session-scoped fixture to delete the test buckets after all tests are run."""
+    """
+    A session-scoped, auto-use fixture that deletes all buckets registered
+    in the `buckets_to_delete` set after the entire test session is complete.
+    """
     yield
     # This code runs after the entire test session finishes
     use_extended_gcs = os.getenv(
@@ -154,6 +170,8 @@ def final_cleanup(gcs_factory, buckets_to_delete):
         is_real_gcs = (
             os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
         )
+        # Mock authentication if not using a real GCS endpoint,
+        # since grpc client in extended_gcsfs does not work with anon access
         mock_authentication_manager = (
             patch("google.auth.default", return_value=(None, "fake-project"))
             if not is_real_gcs
@@ -165,8 +183,9 @@ def final_cleanup(gcs_factory, buckets_to_delete):
     with mock_authentication_manager:
         gcs = gcs_factory()
         for bucket in buckets_to_delete:
-            # For real GCS, only delete if created by the test suite.
-            # For emulators, always delete.
+            # The cleanup logic attempts to delete every bucket that was
+            # added to the set during the session. For real GCS, only delete if
+            # created by the test suite.
             try:
                 if gcs.exists(bucket):
                     gcs.rm(bucket, recursive=True)
@@ -175,29 +194,6 @@ def final_cleanup(gcs_factory, buckets_to_delete):
                 logging.warning(
                     f"Failed to perform final cleanup for bucket {bucket}: {e}"
                 )
-
-@pytest.fixture
-def extended_gcsfs(gcs_factory, buckets_to_delete, populate=True):
-    extended_gcsfs = _create_extended_gcsfs(gcs_factory, buckets_to_delete, populate)
-    try:
-        yield extended_gcsfs
-    finally:
-        _cleanup_gcs(extended_gcsfs)
-
-
-@pytest.fixture
-def extended_gcs_factory(gcs_factory, buckets_to_delete, populate=True):
-    created_instances = []
-
-    def factory(**kwargs):
-        fs = _create_extended_gcsfs(gcs_factory, buckets_to_delete, populate, **kwargs)
-        created_instances.append(fs)
-        return fs
-
-    yield factory
-
-    for fs in created_instances:
-        _cleanup_gcs(fs)
 
 
 @pytest.fixture

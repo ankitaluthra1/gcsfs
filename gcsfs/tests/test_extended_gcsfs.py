@@ -14,6 +14,8 @@ from gcsfs.checkers import ConsistencyChecker, MD5Checker, SizeChecker
 from gcsfs.extended_gcsfs import BucketType
 from gcsfs.tests.conftest import csv_files, files, text_files
 from gcsfs.tests.settings import TEST_ZONAL_BUCKET
+from gcsfs.tests.conftest import csv_files, files, text_files
+from gcsfs.tests.settings import TEST_ZONAL_BUCKET
 
 file = "test/accounts.1.json"
 file_path = f"{TEST_ZONAL_BUCKET}/{file}"
