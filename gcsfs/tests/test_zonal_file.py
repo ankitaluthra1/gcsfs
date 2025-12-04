@@ -113,7 +113,7 @@ def test_zonal_file_discard(extended_gcsfs, zonal_write_mocks):  # noqa: F841
             f.discard()
         mock_logger.warning.assert_called_once()
         assert (
-            "Discard is unavailable for Zonal Buckets"
+            "Discard is not applicable for Zonal Buckets"
             in mock_logger.warning.call_args[0][0]
         )
 
