@@ -175,13 +175,13 @@ def test_open_uses_correct_blocksize_and_consistency_for_all_bucket_types(
             assert f.blocksize == file_block_size
             assert isinstance(f.checker, SizeChecker)
 
-
-def test_open_uses_default_blocksize_and_consistency_from_fs(extended_gcsfs, gcs_bucket_mocks):
+@pytest.mark.parametrize("bucket_type_val", list(BucketType))
+def test_open_uses_default_blocksize_and_consistency_from_fs(extended_gcsfs, gcs_bucket_mocks, bucket_type_val):
     csv_file = "2014-01-01.csv"
     csv_file_path = f"{TEST_ZONAL_BUCKET}/{csv_file}"
     csv_data = csv_files[csv_file]
 
-    with gcs_bucket_mocks(csv_data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL):
+    with gcs_bucket_mocks(csv_data, bucket_type_val=bucket_type_val):
         with extended_gcsfs.open(csv_file_path, "rb") as f:
             assert f.blocksize == extended_gcsfs.default_block_size
             assert type(f.checker) is ConsistencyChecker
