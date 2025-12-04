@@ -14,7 +14,7 @@ steps:
     args:
       - "-c"
       - |
-        if [[ "${_PR_Label}" == *"gcb-perf"* ]]; then
+        if [[ "${_PR_LABELS}" == *"gcb-perf"* ]]; then
           # --- Original Logic Starts Here ---
           gcloud compute instances create gcsfs-perf-test-vm-${_SHORT_BUILD_ID} \
             --project=${PROJECT_ID} \
@@ -28,7 +28,7 @@ steps:
             --network-tier=PREMIUM \
             --metadata=enable-oslogin=TRUE
         else
-          echo "Skipping create-vm: _PR_Label ('${_PR_Label}') does not contain 'gcb-perf'."
+          echo "Skipping create-vm: _PR_LABELS ('${_PR_LABELS}') does not contain 'gcb-perf'."
         fi
     waitFor: ["-"]
 
@@ -41,7 +41,7 @@ steps:
     args:
       - "-c"
       - |
-        if [[ "${_PR_Label}" == *"gcb-perf"* ]]; then
+        if [[ "${_PR_LABELS}" == *"gcb-perf"* ]]; then
           set -e
           # Wait for the VM to be fully initialized and SSH to be ready.
           for i in {1..10}; do
@@ -80,7 +80,7 @@ steps:
           # Execute the script on the VM via SSH.
           gcloud compute ssh gcsfs-perf-test-vm-${_SHORT_BUILD_ID} --zone=${_ZONE} --internal-ip --command="$$VM_SCRIPT"
         else
-          echo "Skipping run-tests-on-vm: _PR_Label ('${_PR_Label}') does not contain 'gcb-perf'."
+          echo "Skipping run-tests-on-vm: _PR_LABELS ('${_PR_LABELS}') does not contain 'gcb-perf'."
         fi
     secretEnv: ['SSH_KEY']
     waitFor:
@@ -96,12 +96,12 @@ steps:
     args:
       - "-c"
       - |
-        if [[ "${_PR_Label}" == *"gcb-perf"* ]]; then
+        if [[ "${_PR_LABELS}" == *"gcb-perf"* ]]; then
           gcloud compute instances delete gcsfs-perf-test-vm-${_SHORT_BUILD_ID} \
             --zone=${_ZONE} \
             --quiet
         else
-          echo "Skipping delete-vm: _PR_Label ('${_PR_Label}') does not contain 'gcb-perf'."
+          echo "Skipping delete-vm: _PR_LABELS ('${_PR_LABELS}') does not contain 'gcb-perf'."
         fi
     waitFor:
       - "run-tests-on-vm"
