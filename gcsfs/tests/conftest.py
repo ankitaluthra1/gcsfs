@@ -142,6 +142,28 @@ def gcs(gcs_factory, buckets_to_delete, populate=True):
     finally:
         _cleanup_gcs(gcs)
 
+@pytest.fixture
+def extended_gcs_factory(gcs_factory, buckets_to_delete, populate=True):
+    created_instances = []
+
+    def factory(**kwargs):
+        fs = _create_extended_gcsfs(gcs_factory, buckets_to_delete, populate, **kwargs)
+        created_instances.append(fs)
+        return fs
+
+    yield factory
+
+    for fs in created_instances:
+        _cleanup_gcs(fs)
+
+@pytest.fixture
+def extended_gcsfs(gcs_factory, buckets_to_delete, populate=True):
+    extended_gcsfs = _create_extended_gcsfs(gcs_factory, buckets_to_delete, populate)
+    try:
+        yield extended_gcsfs
+    finally:
+        _cleanup_gcs(extended_gcsfs)
+
 
 def _cleanup_gcs(gcs):
     """Clean the bucket contents, logging a warning on failure."""

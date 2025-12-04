@@ -45,7 +45,7 @@ def gcs_bucket_mocks():
 
     @contextlib.contextmanager
     def _gcs_bucket_mocks_factory(
-        file_data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
+        file_data, bucket_type_val
     ):
         """Creates mocks for a given file content and bucket type."""
         is_real_gcs = (
@@ -134,7 +134,7 @@ def test_read_block_zb(extended_gcsfs, gcs_bucket_mocks, subtests):
             path = file_path
 
             with gcs_bucket_mocks(
-                json_data
+                json_data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
             ) as mocks:
                 result = extended_gcsfs.read_block(path, offset, length, delimiter)
 
