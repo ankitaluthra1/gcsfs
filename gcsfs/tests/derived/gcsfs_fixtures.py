@@ -13,7 +13,7 @@ class GcsfsFixtures(AbstractFixtures):
     @pytest.fixture(scope="class")
     def fs(self, docker_gcs, buckets_to_delete):
         GCSFileSystem.clear_instance_cache()
-        gcs = fsspec.filesystem("gcs", endpoint_url=docker_gcs)
+        gcs = fsspec.filesystem("gcs", endpoint_url=docker_gcs, token="anon")
         try:  # ensure we're empty.
             # Create the bucket if it doesn't exist, otherwise clean it.
             if not gcs.exists(TEST_BUCKET):
