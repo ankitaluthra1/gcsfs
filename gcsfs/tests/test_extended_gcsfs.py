@@ -219,7 +219,7 @@ def test_readline_zb(extended_gcsfs, gcs_bucket_mocks):
     for k, data in all_items:
         with gcs_bucket_mocks(
             data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
-        ) as mocks:
+        ):
             with extended_gcsfs.open("/".join([TEST_ZONAL_BUCKET, k]), "rb") as f:
                 result = f.readline()
                 expected = data.split(b"\n")[0] + (b"\n" if data.count(b"\n") else b"")
@@ -236,7 +236,7 @@ def test_readline_from_cache_zb(extended_gcsfs, gcs_bucket_mocks):
                 f.write(data)
     with gcs_bucket_mocks(
         data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
-    ) as mocks:
+    ):
         with extended_gcsfs.open(a, "rb") as f:
             result = f.readline()
             assert result == b"a,b\n"
@@ -264,7 +264,7 @@ def test_readline_empty_zb(extended_gcsfs, gcs_bucket_mocks):
                 f.write(data)
     with gcs_bucket_mocks(
         data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
-    ) as mocks:
+    ):
         with extended_gcsfs.open(b, "rb") as f:
             result = f.readline()
             assert result == data
@@ -280,7 +280,7 @@ def test_readline_blocksize_zb(extended_gcsfs, gcs_bucket_mocks):
                 f.write(data)
     with gcs_bucket_mocks(
         data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
-    ) as mocks:
+    ):
         with extended_gcsfs.open(c, "rb", block_size=2**18) as f:
             result = f.readline()
             expected = b"ab\n"
