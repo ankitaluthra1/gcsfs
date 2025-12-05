@@ -982,6 +982,7 @@ def test_bigger_than_block_read(gcs):
 
 def test_current(gcs):
     from gcsfs.tests import conftest
+    from gcsfs import GCSFileSystem
 
     assert GCSFileSystem.current() is gcs
     gcs2 = GCSFileSystem(**conftest.params)
