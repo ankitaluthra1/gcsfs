@@ -131,7 +131,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             self,
             path,
             mode,
-            block_size = block_size or self.default_block_size,
+            block_size=block_size or self.default_block_size,
             cache_options=cache_options,
             consistency=consistency or self.consistency,
             metadata=metadata,

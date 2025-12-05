@@ -142,6 +142,7 @@ def gcs(gcs_factory, buckets_to_delete, populate=True):
     finally:
         _cleanup_gcs(gcs)
 
+
 @pytest.fixture
 def extended_gcs_factory(gcs_factory, buckets_to_delete, populate=True):
     created_instances = []
@@ -155,6 +156,7 @@ def extended_gcs_factory(gcs_factory, buckets_to_delete, populate=True):
 
     for fs in created_instances:
         _cleanup_gcs(fs)
+
 
 @pytest.fixture
 def extended_gcsfs(gcs_factory, buckets_to_delete, populate=True):
@@ -296,6 +298,7 @@ def cleanup_versioned_bucket(gcs, bucket_name, prefix=None):
         blob.delete(retry=retry_policy)
 
     logging.info("Successfully deleted %d object versions.", len(blobs_to_delete))
+
 
 def _create_extended_gcsfs(gcs_factory, buckets_to_delete, populate=True, **kwargs):
     is_real_gcs = (

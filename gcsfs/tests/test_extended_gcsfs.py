@@ -14,8 +14,6 @@ from gcsfs.checkers import ConsistencyChecker, MD5Checker, SizeChecker
 from gcsfs.extended_gcsfs import BucketType
 from gcsfs.tests.conftest import csv_files, files, text_files
 from gcsfs.tests.settings import TEST_ZONAL_BUCKET
-from gcsfs.tests.conftest import csv_files, files, text_files
-from gcsfs.tests.settings import TEST_ZONAL_BUCKET
 
 file = "test/accounts.1.json"
 file_path = f"{TEST_ZONAL_BUCKET}/{file}"
@@ -44,9 +42,7 @@ def gcs_bucket_mocks():
     """A factory fixture for mocking bucket functionality for different bucket types."""
 
     @contextlib.contextmanager
-    def _gcs_bucket_mocks_factory(
-        file_data, bucket_type_val
-    ):
+    def _gcs_bucket_mocks_factory(file_data, bucket_type_val):
         """Creates mocks for a given file content and bucket type."""
         is_real_gcs = (
             os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
@@ -150,6 +146,7 @@ def test_read_block_zb(extended_gcsfs, gcs_bucket_mocks, subtests):
                     else:
                         mocks["downloader"].download_ranges.assert_not_called()
 
+
 @pytest.mark.parametrize("bucket_type_val", list(BucketType))
 def test_open_uses_correct_blocksize_and_consistency_for_all_bucket_types(
     extended_gcs_factory, gcs_bucket_mocks, bucket_type_val
@@ -175,8 +172,11 @@ def test_open_uses_correct_blocksize_and_consistency_for_all_bucket_types(
             assert f.blocksize == file_block_size
             assert isinstance(f.checker, SizeChecker)
 
+
 @pytest.mark.parametrize("bucket_type_val", list(BucketType))
-def test_open_uses_default_blocksize_and_consistency_from_fs(extended_gcsfs, gcs_bucket_mocks, bucket_type_val):
+def test_open_uses_default_blocksize_and_consistency_from_fs(
+    extended_gcsfs, gcs_bucket_mocks, bucket_type_val
+):
     csv_file = "2014-01-01.csv"
     csv_file_path = f"{TEST_ZONAL_BUCKET}/{csv_file}"
     csv_data = csv_files[csv_file]
@@ -185,6 +185,7 @@ def test_open_uses_default_blocksize_and_consistency_from_fs(extended_gcsfs, gcs
         with extended_gcsfs.open(csv_file_path, "rb") as f:
             assert f.blocksize == extended_gcsfs.default_block_size
             assert type(f.checker) is ConsistencyChecker
+
 
 def test_read_small_zb(extended_gcsfs, gcs_bucket_mocks):
     csv_file = "2014-01-01.csv"
@@ -217,9 +218,7 @@ def test_readline_zb(extended_gcsfs, gcs_bucket_mocks):
         [files.items(), csv_files.items(), text_files.items()]
     )
     for k, data in all_items:
-        with gcs_bucket_mocks(
-            data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
-        ):
+        with gcs_bucket_mocks(data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL):
             with extended_gcsfs.open("/".join([TEST_ZONAL_BUCKET, k]), "rb") as f:
                 result = f.readline()
                 expected = data.split(b"\n")[0] + (b"\n" if data.count(b"\n") else b"")
@@ -234,9 +233,7 @@ def test_readline_from_cache_zb(extended_gcsfs, gcs_bucket_mocks):
         ):
             with extended_gcsfs.open(a, "wb") as f:
                 f.write(data)
-    with gcs_bucket_mocks(
-        data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
-    ):
+    with gcs_bucket_mocks(data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL):
         with extended_gcsfs.open(a, "rb") as f:
             result = f.readline()
             assert result == b"a,b\n"
@@ -262,9 +259,7 @@ def test_readline_empty_zb(extended_gcsfs, gcs_bucket_mocks):
         ):
             with extended_gcsfs.open(b, "wb") as f:
                 f.write(data)
-    with gcs_bucket_mocks(
-        data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
-    ):
+    with gcs_bucket_mocks(data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL):
         with extended_gcsfs.open(b, "rb") as f:
             result = f.readline()
             assert result == data
@@ -278,9 +273,7 @@ def test_readline_blocksize_zb(extended_gcsfs, gcs_bucket_mocks):
         ):
             with extended_gcsfs.open(c, "wb") as f:
                 f.write(data)
-    with gcs_bucket_mocks(
-        data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
-    ):
+    with gcs_bucket_mocks(data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL):
         with extended_gcsfs.open(c, "rb", block_size=2**18) as f:
             result = f.readline()
             expected = b"ab\n"
