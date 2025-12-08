@@ -17,10 +17,11 @@ BUCKET_NAME="" # Mandatory
 BUCKET_TYPE="" # Mandatory
 
 PROJECT="" # Mandatory
+OUTPUT_DIR=""
 JSON_OUTPUT_PREFIX="benchmark_results"
 
 function usage() {
-    echo "Usage: $0 -p <project> [--regional-bucket <regional_bucket>] [--zonal-bucket <zonal_bucket>] [--hns-bucket <hns_bucket>] [--json-output-prefix <prefix>] [-n num_files] [-s size_mb] [-r rounds] [-i iterations] [-c chunk_mb] [-d depth] [-k test_pattern] [--pattern <pattern>] [--threads <threads>] [--profile]"
+    echo "Usage: $0 -p <project> [--output-dir <dir>] [--json-output-prefix <prefix>] [-n num_files] [-s size_mb] [-r rounds] [-i iterations] [-c chunk_mb] [-d depth] [-k test_pattern] [--pattern <pattern>] [--threads <threads>] [--profile]"
     echo "  -n: Number of files for the benchmark (default: $NUM_FILES)"
     echo "  -s: Size of each file in MB (default: $FILE_SIZE_MB)"
     echo "  -r: Number of benchmark rounds (default: $ROUNDS)"
@@ -30,6 +31,7 @@ function usage() {
     echo "  --threads: Number of threads for read benchmarks (default: $THREADS)"
     echo "  --bucket-name: GCS bucket to use for the benchmark (MANDATORY)"
     echo "  --bucket-type: Type of the bucket ('regional', 'hns', 'zonal') (MANDATORY)"
+    echo "  --output-dir: Directory to save the output JSON file (default: project root)"
     echo "  --json-output-prefix: Prefix for the output JSON file (default: benchmark_results)"
     echo "  -p: GCP project to use (MANDATORY)"
     echo "  --profile: Enable cProfile for the benchmark run (default: disabled)"
@@ -51,6 +53,7 @@ parse_arguments() {
           case "${OPTARG}" in
             bucket-name) val="${!OPTIND}"; OPTIND=$((OPTIND + 1)); BUCKET_NAME=$val ;;
             bucket-type) val="${!OPTIND}"; OPTIND=$((OPTIND + 1)); BUCKET_TYPE=$val ;;
+            output-dir) val="${!OPTIND}"; OPTIND=$((OPTIND + 1)); OUTPUT_DIR=$val ;;
             json-output-prefix) val="${!OPTIND}"; OPTIND=$((OPTIND + 1)); JSON_OUTPUT_PREFIX=$val ;;
             threads) val="${!OPTIND}"; OPTIND=$((OPTIND + 1)); THREADS=$val ;;
             pattern) val="${!OPTIND}"; OPTIND=$((OPTIND + 1)); PATTERN=$val ;;
@@ -128,30 +131,40 @@ run_standard_benchmark() {
     fi
 
     echo -e "\n--- Running benchmarks for ${bucket_type} bucket: ${bucket_name} (Pattern: '${current_test_pattern}') ---"
+    local regional_file_prefix="regional-file-bench"
+    export GCSFS_BENCH_REGIONAL_FILE_PATH="gs://${bucket_name}/${regional_file_prefix}"
+
     pytest_args+=("-k" "$current_test_pattern")
 
     run_pytest_with_monitoring "$bucket_type" "${pytest_args[@]}"
+    unset GCSFS_BENCH_REGIONAL_FILE_PATH
 }
 
 main() {
     parse_arguments "$@"
 
-    local script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
-    local project_root="$script_dir/../../../../.."
+    local script_dir
+    script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
     local benchmark_dir="$script_dir/.."
 
+    [ -z "$OUTPUT_DIR" ] && OUTPUT_DIR="$benchmark_dir"
+    
     export_env_variables
 
-    local json_output="$project_root/${JSON_OUTPUT_PREFIX}_${BUCKET_TYPE}.json"
+    local json_output="$OUTPUT_DIR/${JSON_OUTPUT_PREFIX}_${BUCKET_TYPE}.json"
 
     local base_pytest_args=("$benchmark_dir" "--benchmark-json=$json_output")
     [ "$PROFILE_ENABLED" = true ] && base_pytest_args+=("--benchmark-cprofile=tottime")
+
+    export GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT=true
 
     if [ "$BUCKET_TYPE" == "zonal" ]; then
         run_zonal_benchmark "$BUCKET_TYPE" "$BUCKET_NAME" "$TEST_PATTERN" "${base_pytest_args[@]}"
     else
         run_standard_benchmark "$BUCKET_TYPE" "$BUCKET_NAME" "$TEST_PATTERN" "${base_pytest_args[@]}"
     fi
+
+    unset GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT
 
     echo -e "\n--- Benchmark run complete ---"
 }

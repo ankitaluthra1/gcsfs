@@ -2,3 +2,4 @@
 gcsfs
 pytest
 pytest-benchmark
+pytest-timeout

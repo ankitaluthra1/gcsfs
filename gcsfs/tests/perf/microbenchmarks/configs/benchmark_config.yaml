@@ -4,82 +4,110 @@ common:
   profile: "no" # "yes" or "no"
   buckets:
     regional: "jasha-test-bucket-gcsfs-usc1"
-    hns: "jasha-test-bucket-gcsfs-hns-usc1"
-    zonal: "jasha-test-bucket-gcsfs-zonal-usc1" # Optional: "your-zonal-bucket-name"
+    hns: ""
+    zonal: ""
 
 # A list of benchmark scenarios to run.
 # Each scenario will be run against all buckets defined in the common section.
 benchmarks:
-  - name: "read_1gb_file_100mb_chunk_1_round_seq"
-    group: "read"
-    bucket_types:
-      - "zonal"   
+  # Read benchmarks
+
+  - name: "read_1gb_file_100mb_chunk_seq"
+    group: "read" 
     params:
       num_files: 1
       file_size: 1024 # in MB
       chunk_size: 100 # in MB
-      rounds: 1
+      rounds: 10
       threads: 1
       pattern: "seq"
 
-  - name: "read_1gb_file_100mb_chunk_1_round_seq_16_threads"
-    group: "read"
-    bucket_types:
-      - "zonal"   
+  - name: "read_1gb_file_100mb_chunk_seq_16_threads"
+    group: "read" 
+    params:
+      num_files: 1
+      file_size: 1024 # in MB
+      chunk_size: 100 # in MB
+      rounds: 10
+      threads: 16
+      pattern: "seq"
+
+  - name: "read_1gb_file_100mb_chunk_seq_32_threads"
+    group: "read" 
+    params:
+      num_files: 1
+      file_size: 1024 # in MB
+      chunk_size: 100 # in MB
+      rounds: 10
+      threads: 32
+      pattern: "seq"
+
+  - name: "read_1gb_file_100mb_chunk_seq_16_threads_16_files"
+    group: "read" 
     params:
       num_files: 16
       file_size: 1024 # in MB
       chunk_size: 100 # in MB
-      rounds: 1
+      rounds: 10
       threads: 16
       pattern: "seq"
 
-  - name: "read_1gb_file_100mb_chunk_1_round_rand"
-    group: "read"
-    bucket_types:
-      - "zonal"   
+  - name: "read_1gb_file_100mb_chunk_seq_32_threads_32_files"
+    group: "read" 
+    params:
+      num_files: 32
+      file_size: 1024 # in MB
+      chunk_size: 100 # in MB
+      rounds: 10
+      threads: 32
+      pattern: "seq"
+
+  - name: "read_1gb_file_100mb_chunk_rand"
+    group: "read"  
     params:
       num_files: 1
       file_size: 1024 # in MB
       chunk_size: 100 # in MB
-      rounds: 1
+      rounds: 10
       threads: 1
       pattern: "rand"
 
-  - name: "read_1gb_file_100mb_chunk_1_rounds_rand_16_threads"
-    group: "read"
-    bucket_types:
-      - "zonal"   
+  - name: "read_1gb_file_100mb_chunk_rand_16_threads"
+    group: "read"  
     params:
       num_files: 1
       file_size: 1024 # in MB
       chunk_size: 100 # in MB
-      rounds: 1
+      rounds: 10
       threads: 16
       pattern: "rand"
 
-  - name: "write_1gb_file_100mb_chunk_1_round_seq"
-    group: "write"
-    bucket_types:
-      - "regional"
-      - "hns"    
+  - name: "read_1gb_file_100mb_chunk_rand_32_threads"
+    group: "read"  
     params:
       num_files: 1
       file_size: 1024 # in MB
       chunk_size: 100 # in MB
-      rounds: 1
-      threads: 1
-      pattern: "seq"
+      rounds: 10
+      threads: 32
+      pattern: "rand"
 
-  - name: "write_1gb_file_100mb_chunk_1_round_seq_16_threads"
-    group: "write"
-    bucket_types:
-      - "regional"
-      - "hns"
+  - name: "read_1gb_file_100mb_chunk_rand_16_threads_16_files"
+    group: "read"  
     params:
-      num_files: 10
+      num_files: 16
       file_size: 1024 # in MB
       chunk_size: 100 # in MB
-      rounds: 1
-      threads: 10
-      pattern: "seq"
+      rounds: 10
+      threads: 16
+      pattern: "rand"
+
+  - name: "read_1gb_file_100mb_chunk_rand_32_threads_32_files"
+    group: "read"  
+    params:
+      num_files: 32
+      file_size: 1024 # in MB
+      chunk_size: 100 # in MB
+      rounds: 10
+      threads: 32
+      pattern: "rand"

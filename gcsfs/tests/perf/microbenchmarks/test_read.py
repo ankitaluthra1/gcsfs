@@ -11,43 +11,45 @@ from gcsfs.tests.perf.microbenchmarks.conftest import (
     BENCHMARK_THREADS,
     CHUNK_SIZE_BYTES,
 )
+ 
+def _read_op_seq(gcs, path, chunk):
+    with gcs.open(path, "rb") as f:
+        while f.read(chunk):
+            pass
 
-def _read_op_seq(gcs, paths, chunk):
-    for path in paths:
-        with gcs.open(path, "rb") as f:
-            while f.read(chunk):
-                pass
-
-def _read_op_rand(gcs, paths, chunk, offsets):
-    for path in paths:
-        with gcs.open(path, "rb") as f:
-            # Read the same number of chunks as are in the file, but from random offsets
-            for _ in range(len(offsets)):
-                f.seek(random.choice(offsets))
-                f.read(chunk)
+def _read_op_rand(gcs, path, chunk, offsets):
+    random.shuffle(offsets)
+    with gcs.open(path, "rb") as f:
+        # Read the same number of chunks as are in the file, but from random offsets
+        for _ in range(len(offsets)):
+            f.seek(random.choice(offsets))
+            f.read(chunk)
 
 def _multi_thread_read_op_seq(gcs, paths, chunk):
     with ThreadPoolExecutor(max_workers=BENCHMARK_THREADS) as executor:
         # Each thread reads one full file sequentially
-        list(executor.map(lambda path: _read_op_seq(gcs, [path], chunk), paths))
+        list(executor.map(lambda path: _read_op_seq(gcs, path, chunk), paths))
 
-
-def _multi_thread_read_op_rand(gcs, path, chunk, offsets):
+def _multi_thread_read_op_rand(gcs, paths, chunk, offsets, num_files):
     if BENCHMARK_THREADS == 0:
         return
-    num_reads_per_thread = len(offsets) // BENCHMARK_THREADS
 
-    def worker():
-        # A gcsfs instance is created per-thread by default, which is what we want
-        # to ensure thread safety.
+    def random_read_worker(path):
+        local_offsets = list(offsets)
+        random.shuffle(local_offsets)
         with gcs.open(path, "rb") as f:
-            for _ in range(num_reads_per_thread):
-                f.seek(random.choice(offsets))
+            for offset in local_offsets:
+                f.seek(offset)
                 f.read(chunk)
 
     with ThreadPoolExecutor(max_workers=BENCHMARK_THREADS) as executor:
-        futures = [executor.submit(worker) for _ in range(BENCHMARK_THREADS)]
-        [f.result() for f in futures]
+        if num_files == 1:
+            # All threads read the same file randomly.
+            futures = [executor.submit(random_read_worker, paths[0]) for _ in range(BENCHMARK_THREADS)]
+        else:
+            # Each thread reads a different file randomly.
+            futures = executor.map(random_read_worker, paths)
+        list(futures) # Wait for all futures to complete
 
 
 def test_read(benchmark, gcs_benchmark_fixture):
@@ -71,8 +73,7 @@ def test_read(benchmark, gcs_benchmark_fixture):
             if CHUNK_SIZE_BYTES == 0 or file_size_bytes < CHUNK_SIZE_BYTES: offsets = [0]
             else: offsets = list(range(0, file_size_bytes - CHUNK_SIZE_BYTES, CHUNK_SIZE_BYTES))
             op = _multi_thread_read_op_rand
-            # For multi-threaded random, we operate on a single file
-            op_args = (gcs, file_paths[0], CHUNK_SIZE_BYTES, offsets)
+            op_args = (gcs, file_paths, CHUNK_SIZE_BYTES, offsets, num_files)
         else: # seq
             op = _multi_thread_read_op_seq
             op_args = (gcs, file_paths, CHUNK_SIZE_BYTES)
@@ -80,11 +81,11 @@ def test_read(benchmark, gcs_benchmark_fixture):
         if BENCHMARK_PATTERN == "rand":
             if CHUNK_SIZE_BYTES == 0 or file_size_bytes < CHUNK_SIZE_BYTES: offsets = [0]
             else: offsets = list(range(0, file_size_bytes - CHUNK_SIZE_BYTES, CHUNK_SIZE_BYTES))
-            op = _read_op_rand
-            op_args = (gcs, file_paths, CHUNK_SIZE_BYTES, offsets)
+            op = _read_op_rand # This is for single-threaded, single file random read
+            op_args = (gcs, file_paths[0], CHUNK_SIZE_BYTES, offsets)
         else: # seq
             op = _read_op_seq
-            op_args = (gcs, file_paths, CHUNK_SIZE_BYTES)
+            op_args = (gcs, file_paths[0], CHUNK_SIZE_BYTES)
 
     benchmark.pedantic(
         op,

@@ -120,13 +120,17 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         bucket, _, _ = self.split_path(path)
         bucket_type = self._sync_get_bucket_type(bucket)
         self._storage_layout_cache[bucket] = bucket_type
+        
+        if block_size is None:
+            block_size = self.default_block_size
+
         return gcs_file_types[bucket_type](
             self,
             path,
             mode,
-            block_size,
+            block_size = block_size or self.default_block_size,
             cache_options=cache_options,
-            consistency=consistency,
+            consistency=consistency or self.consistency,
             metadata=metadata,
             acl=acl,
             autocommit=autocommit,

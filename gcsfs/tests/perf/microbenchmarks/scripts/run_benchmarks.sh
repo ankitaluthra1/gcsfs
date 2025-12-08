@@ -5,7 +5,7 @@ set -e
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 PROJECT_ROOT="$SCRIPT_DIR/../../../../.."
 CONFIG_DIR="$SCRIPT_DIR/../configs"
-TSV_OUTPUT="$PROJECT_ROOT/consolidated_benchmark_results.tsv"
+RESULTS_DIR="" # Set in main
 SCENARIO_NAME="" # Optional: a specific scenario name to run
 YAML_FILE="" # Mandatory: The YAML configuration file to use.
 
@@ -19,28 +19,25 @@ function usage() {
 check_dependencies() {
     echo "## Checking dependencies..."
     if ! command -v yq &> /dev/null; then
-        echo "yq not found. Attempting to install..."
-        if command -v apt-get &> /dev/null; then sudo apt-get update && sudo apt-get install -y yq;
+        echo "yq not found. Attempting to install the latest version..."
+        if command -v apt-get &> /dev/null; then
+            sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq && sudo chmod +x /usr/local/bin/yq
         elif command -v yum &> /dev/null; then sudo yum install -y yq;
         elif command -v dnf &> /dev/null; then sudo dnf install -y yq;
-        else echo "Could not find a supported package manager. Please install yq (v3) manually."; exit 1; fi
+        else echo "Could not find a supported package manager. Please install yq manually."; exit 1; fi
         if ! command -v yq &> /dev/null; then echo "yq installation failed."; exit 1; fi
     fi
     # Check for jq (json parsing)
     if ! command -v jq &> /dev/null; then
-        echo "jq not found. Attempting to install..."
-        if command -v apt-get &> /dev/null; then sudo apt-get update && sudo apt-get install -y jq;
+        echo "jq not found. Attempting to install the latest version..."
+        if command -v apt-get &> /dev/null; then
+            sudo wget https://github.com/jqlang/jq/releases/latest/download/jq-linux64 -O /usr/local/bin/jq && sudo chmod +x /usr/local/bin/jq
         elif command -v yum &> /dev/null; then sudo yum install -y jq;
         elif command -v dnf &> /dev/null; then sudo dnf install -y jq;
         else echo "Could not find a supported package manager. Please install jq manually."; exit 1; fi
         if ! command -v jq &> /dev/null; then echo "jq installation failed."; exit 1; fi
     fi
     echo "Dependencies are satisfied."
-}
-
-cleanup_previous_results() {
-    echo "## Cleaning up previous results..."
-    rm -f "$PROJECT_ROOT"/benchmark_results_*.json "$PROJECT_ROOT"/resource_stats_*.log "$TSV_OUTPUT"
 }
 
 parse_args() {
@@ -117,7 +114,7 @@ run_scenario() {
     [ "$PROFILE" = "yes" ] && CMD+=(--profile)
 
     CMD+=(--json-output-prefix "benchmark_results_${name//\"/}")
-    
+    CMD+=(--output-dir "$RESULTS_DIR")
     declare -A available_buckets
     [ -n "$REGIONAL_BUCKET" ] && available_buckets["regional"]=$REGIONAL_BUCKET
     [ -n "$HNS_BUCKET" ] && available_buckets["hns"]=$HNS_BUCKET
@@ -147,10 +144,11 @@ run_scenario() {
 
 process_results() {
     echo -e "\n## All scenarios complete. Consolidating results..."
-    local HEADER="Group\tBucket_Name\tBucket_Type\tPattern\tThreads\tNum_Files\tFile_Size(MB)\tChunk_Size(MB)\tMin(s)\tMax(s)\tMean(s)\tRounds\tIters\tP90(s)\tP95(s)\tP99(s)\tThroughput(MB/s)"
+    local tsv_output="$RESULTS_DIR/consolidated_benchmark_results.tsv"
+    local HEADER="Group\tBucket_Name\tBucket_Type\tPattern\tThreads\tNum_Files\tFile_Size(MB)\tChunk_Size(MB)\tMin(s)\tMax(s)\tMean(s)\tRounds\tIters\tP90(s)\tP95(s)\tP99(s)\tMax Throughput(MB/s)"
 
     # Check if any result files were created
-    if ! ls "$PROJECT_ROOT"/benchmark_results_*.json 1> /dev/null 2>&1; then
+    if ! ls "$RESULTS_DIR"/benchmark_results_*.json 1> /dev/null 2>&1; then
         echo "No benchmark result files found. Skipping result processing."
         return
     fi
@@ -161,10 +159,19 @@ process_results() {
   def percentile(p):
     .stats.data | sort | .[((length * p / 100 + 0.5) | floor) - 1] | tostring | .[0:8];
 
-  # Function to calculate throughput
+  # Function to calculate max throughput
   def throughput:
-    if (.group | contains("LIST")) or .stats.mean == 0 then "N/A"
-    else ((.extra_info.num_files * .extra_info.file_size) / (1024*1024) / .stats.mean) | tostring | .[0:8]
+    if (.group | contains("LIST")) or .stats.min == 0 then "N/A"
+    else
+      (
+        (
+          if (.extra_info.threads // 1 | tonumber > 1) and (.extra_info.num_files | tonumber == 1) then
+            (.extra_info.threads * .extra_info.file_size)
+          else
+            (.extra_info.num_files * .extra_info.file_size)
+          end
+        ) / (1024*1024) / .stats.min
+      ) | tostring | .[0:8]
     end;
 
   # Main processing logic
@@ -191,23 +198,32 @@ process_results() {
   ] | @tsv
 ' <(
       # Find all JSON files and wrap them in an object with their bucket type
-      for f in "$PROJECT_ROOT"/benchmark_results_*.json; do
-        local bucket_type=$(basename "$f" | sed -e 's/.*_\(regional\|hns\|zonal\)\.json/\1/')
-        jq -c --arg bucket_type "$bucket_type" '{bucket_type: $bucket_type, data: .}' "$f"
+      for f in "$RESULTS_DIR"/benchmark_results_*.json; do
+        # Validate that the file content is a JSON object before processing
+        if jq -e 'type == "object"' "$f" > /dev/null; then
+            local bucket_type
+            bucket_type=$(basename "$f" | sed -e 's/.*_\(regional\|hns\|zonal\)\.json/\1/')
+            jq -c --arg bucket_type "$bucket_type" '{bucket_type: $bucket_type, data: .}' "$f"
+        fi
       done
-    ) | (echo -e "$HEADER" && cat) | column -t -s $'\t' > "$TSV_OUTPUT"
+    ) | (echo -e "$HEADER" && cat) | column -t -s $'\t' > "$tsv_output"
 
     echo -e "\n--- Consolidated Benchmark Results ---"
-    cat "$TSV_OUTPUT"
-    echo -e "\nFormatted results are saved in: $TSV_OUTPUT"
+    cat "$tsv_output"
+    echo -e "\nFormatted results are saved in: $tsv_output"
 }
 
 main() {
     parse_args "$@"
     echo "--- GCSFS Benchmark Orchestrator ---"
     
+    local timestamp=$(date +%d%m%Y-%H%M%S)
+    local microbenchmarks_dir="$SCRIPT_DIR/.."
+    RESULTS_DIR="$microbenchmarks_dir/__runs__/$timestamp"
+    mkdir -p "$RESULTS_DIR"
+    echo "Results will be stored in: $RESULTS_DIR"
+
     check_dependencies
-    cleanup_previous_results
 
     export CONFIG_FILE="$CONFIG_DIR/$YAML_FILE"
     if [ ! -f "$CONFIG_FILE" ]; then

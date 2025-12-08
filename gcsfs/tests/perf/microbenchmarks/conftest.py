@@ -51,7 +51,7 @@ def gcs_filesystem_factory():
     def factory(**kwargs):
         logging.info(f"Creating new GCSFileSystem instance for '{BUCKET_TYPE}', with EXPERIMENTAL_ZB_HNS_SUPPORT='{GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT}'.")
         GCSFileSystem.clear_instance_cache()
-        return fsspec.filesystem("gcs", **kwargs)
+        return GCSFileSystem(**kwargs)
     return factory
 
 
@@ -67,6 +67,19 @@ def gcs_benchmark_fixture(request, gcs_filesystem_factory):
     file_size_bytes = FILE_SIZE_BYTES if BENCHMARK_GROUP in ['read', 'write'] else 0
 
     gcs = gcs_filesystem_factory()
+
+    regional_file_prefix = os.environ.get("GCSFS_BENCH_REGIONAL_FILE_PATH")
+    if regional_file_prefix:
+        logging.info(
+            "Regional benchmark with pre-created files detected. "
+            "Skipping file creation."
+        )
+        base_path = regional_file_prefix.replace("gs://", "")
+        file_paths = [f"{base_path}-{i}" for i in range(1, NUM_FILES + 1)]
+
+        # Yield without creating files and skip teardown
+        yield gcs, file_paths, b"", num_files, file_size_bytes
+        return
 
     if BUCKET_TYPE == "zonal":
         logging.info("Zonal benchmark detected. Reusing pre-created file.")
@@ -91,12 +104,8 @@ def gcs_benchmark_fixture(request, gcs_filesystem_factory):
     file_content = os.urandom(file_size_bytes)
     # For write benchmarks, we only need the paths and content, not to create files beforehand.
     if BENCHMARK_GROUP == "read":
-        SETUP_CHUNK_SIZE = 8 * 1024 * 1024  # 8MB
-        upload_chunk_size = min(file_size_bytes, SETUP_CHUNK_SIZE) if file_size_bytes > 0 else 0
-        for path in file_paths:
-            with gcs.open(path, "wb") as f:
-                for i in range(0, file_size_bytes, upload_chunk_size or 1):
-                    f.write(file_content[i:i + upload_chunk_size])
+        if file_size_bytes > 0:
+            gcs.pipe({path: file_content for path in file_paths})
     
     yield gcs, file_paths, file_content, num_files, file_size_bytes
 

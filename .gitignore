@@ -104,3 +104,6 @@ target/
 
 libs/*.whl
 benchmark_results.json
+
+# Benchmark results
+gcsfs/tests/perf/microbenchmarks/__runs__/
