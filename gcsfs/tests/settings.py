@@ -1,8 +1,9 @@
 import os
 
-TEST_BUCKET = os.getenv("GCSFS_TEST_BUCKET", "gcsfs_test")
+TEST_BUCKET = os.getenv("GCSFS_TEST_BUCKET", "jasha-test-bucket-gcsfs-asia")
 TEST_VERSIONED_BUCKET = os.getenv("GCSFS_TEST_VERSIONED_BUCKET", "gcsfs_test_versioned")
-TEST_ZONAL_BUCKET = os.getenv("GCSFS_ZONAL_TEST_BUCKET", "gcsfs_zonal_test")
+TEST_ZONAL_BUCKET = os.getenv("GCSFS_ZONAL_TEST_BUCKET", "")
+TEST_HNS_BUCKET = os.getenv("GCSFS_HNS_TEST_BUCKET", "")
 TEST_PROJECT = os.getenv("GCSFS_TEST_PROJECT", "project")
 TEST_REQUESTER_PAYS_BUCKET = f"{TEST_BUCKET}_req_pay"
 TEST_KMS_KEY = os.getenv(
