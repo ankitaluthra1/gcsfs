@@ -280,27 +280,18 @@ def _create_extended_gcsfs(gcs_factory, buckets_to_delete, populate=True, **kwar
         os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
     )
 
-    # Mock authentication if not using a real GCS endpoint,
-    # since grpc client in extended_gcsfs does not work with anon access
-    mock_authentication_manager = (
-        patch("google.auth.default", return_value=(None, "fake-project"))
-        if not is_real_gcs
-        else nullcontext()
-    )
-
-    with mock_authentication_manager:
-        extended_gcsfs = gcs_factory(**kwargs)
-        # Only create/delete/populate the bucket if we are NOT using the real GCS endpoint
-        if not is_real_gcs:
-            try:
-                extended_gcsfs.rm(TEST_ZONAL_BUCKET, recursive=True)
-            except FileNotFoundError:
-                pass
-            extended_gcsfs.mkdir(TEST_ZONAL_BUCKET)
-            buckets_to_delete.add(TEST_ZONAL_BUCKET)
-            if populate:
-                extended_gcsfs.pipe(
-                    {TEST_ZONAL_BUCKET + "/" + k: v for k, v in allfiles.items()}
-                )
-        extended_gcsfs.invalidate_cache()
-        return extended_gcsfs
+    extended_gcsfs = gcs_factory(**kwargs)
+    # Only create/delete/populate the bucket if we are NOT using the real GCS endpoint.
+    if not is_real_gcs:
+        try:
+            extended_gcsfs.rm(TEST_ZONAL_BUCKET, recursive=True)
+        except FileNotFoundError:
+            pass
+        extended_gcsfs.mkdir(TEST_ZONAL_BUCKET)
+        buckets_to_delete.add(TEST_ZONAL_BUCKET)
+        if populate:
+            extended_gcsfs.pipe(
+                {TEST_ZONAL_BUCKET + "/" + k: v for k, v in allfiles.items()}
+            )
+    extended_gcsfs.invalidate_cache()
+    return extended_gcsfs
