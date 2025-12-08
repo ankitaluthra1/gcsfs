@@ -4,7 +4,6 @@ import uuid
 
 import pytest
 
-from gcsfs.tests.conftest import gcs_factory
 
 def publish_benchmark_extra_info(benchmark, params, benchmark_group):
     """
@@ -19,11 +18,12 @@ def publish_benchmark_extra_info(benchmark, params, benchmark_group):
     benchmark.extra_info["rounds"] = params.rounds
     benchmark.extra_info["bucket_name"] = params.bucket_name
     benchmark.extra_info["bucket_type"] = params.bucket_type
+    benchmark.extra_info["processes"] = params.num_processes
     benchmark.group = benchmark_group
 
 
 @pytest.fixture
-def gcsfs_benchmark_read_write(gcs_factory, request):
+def gcsfs_benchmark_read_write(extended_gcs_factory, request):
     """
     A fixture that creates temporary files for a benchmark run and cleans
     them up afterward.
@@ -32,7 +32,7 @@ def gcsfs_benchmark_read_write(gcs_factory, request):
     to determine how many files to create and of what size.
     """
     params = request.param
-    gcs = gcs_factory(block_size=params.block_size_bytes)
+    gcs = extended_gcs_factory(block_size=params.block_size_bytes)
     if not gcs.exists(params.bucket_name):
         gcs.mkdir(params.bucket_name)
 
@@ -51,6 +51,7 @@ def gcsfs_benchmark_read_write(gcs_factory, request):
 
     # Create files by writing random chunks to avoid high memory usage
     for path in file_paths:
+        logging.info(f"Creating file {path}.")
         with gcs.open(path, "wb") as f:
             for _ in range(chunks_to_write):
                 f.write(os.urandom(chunk_size))
@@ -65,3 +66,18 @@ def gcsfs_benchmark_read_write(gcs_factory, request):
         gcs.rm(prefix, recursive=True)
     except Exception as e:
         logging.error(f"Failed to clean up benchmark files: {e}")
+
+
+def create_benchmark_cases_for_bucket(base_cases, bucket_name, bucket_tag):
+    new_cases = []
+
+    if not bucket_name:
+        return new_cases
+
+    for case in base_cases:
+        new_case = case.__class__(**case.__dict__)
+        new_case.bucket_name = bucket_name
+        new_case.bucket_type = bucket_tag
+        new_case.name = f"{case.name}_{bucket_tag}"
+        new_cases.append(new_case)
+    return new_cases
