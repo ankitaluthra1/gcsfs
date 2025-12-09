@@ -9,6 +9,50 @@ MB = 1024 * 1024
 GB = 1024 * MB
 
 
+@pytest.fixture
+def gcsfs_benchmark_read_write(extended_gcs_factory, request):
+    """
+    A fixture that creates temporary files for a benchmark run and cleans
+    them up afterward.
+
+    It uses the `BenchmarkParameters` object from the test's parametrization
+    to determine how many files to create and of what size.
+    """
+    params = request.param
+    gcs = extended_gcs_factory(block_size=params.block_size_bytes)
+
+    prefix = f"{params.bucket_name}/benchmark-files-{uuid.uuid4()}"
+    file_paths = [f"{prefix}/file_{i}" for i in range(params.num_files)]
+
+    logging.info(
+        f"Setting up benchmark '{params.name}': creating {params.num_files} file(s) "
+        f"of size {params.file_size_bytes / 1024 / 1024:.2f} MB each."
+    )
+
+    # Define a 16MB chunk size for writing
+    chunk_size = 16 * 1024 * 1024
+    chunks_to_write = params.file_size_bytes // chunk_size
+    remainder = params.file_size_bytes % chunk_size
+
+    # Create files by writing random chunks to avoid high memory usage
+    for path in file_paths:
+        logging.info(f"Creating file {path}.")
+        with gcs.open(path, "wb") as f:
+            for _ in range(chunks_to_write):
+                f.write(os.urandom(chunk_size))
+            if remainder > 0:
+                f.write(os.urandom(remainder))
+
+    yield gcs, file_paths, params
+
+    # --- Teardown ---
+    logging.info(f"Tearing down benchmark '{params.name}': deleting files.")
+    try:
+        gcs.rm(prefix, recursive=True)
+    except Exception as e:
+        logging.error(f"Failed to clean up benchmark files: {e}")
+
+
 def publish_benchmark_extra_info(benchmark, params, benchmark_group):
     """
     Helper function to publish benchmark parameters to the extra_info property.
@@ -60,65 +104,6 @@ def publish_multi_process_benchmark_extra_info(benchmark, round_durations_s, par
     benchmark.extra_info["stddev_time"] = stddev_time
 
 
-@pytest.fixture
-def gcsfs_benchmark_read_write(extended_gcs_factory, request):
-    """
-    A fixture that creates temporary files for a benchmark run and cleans
-    them up afterward.
-
-    It uses the `BenchmarkParameters` object from the test's parametrization
-    to determine how many files to create and of what size.
-    """
-    params = request.param
-    gcs = extended_gcs_factory(block_size=params.block_size_bytes)
-
-    prefix = f"{params.bucket_name}/benchmark-files-{uuid.uuid4()}"
-    file_paths = [f"{prefix}/file_{i}" for i in range(params.num_files)]
-
-    logging.info(
-        f"Setting up benchmark '{params.name}': creating {params.num_files} file(s) "
-        f"of size {params.file_size_bytes / 1024 / 1024:.2f} MB each."
-    )
-
-    # Define a 16MB chunk size for writing
-    chunk_size = 16 * 1024 * 1024
-    chunks_to_write = params.file_size_bytes // chunk_size
-    remainder = params.file_size_bytes % chunk_size
-
-    # Create files by writing random chunks to avoid high memory usage
-    for path in file_paths:
-        logging.info(f"Creating file {path}.")
-        with gcs.open(path, "wb") as f:
-            for _ in range(chunks_to_write):
-                f.write(os.urandom(chunk_size))
-            if remainder > 0:
-                f.write(os.urandom(remainder))
-
-    yield gcs, file_paths, params
-
-    # --- Teardown ---
-    logging.info(f"Tearing down benchmark '{params.name}': deleting files.")
-    try:
-        gcs.rm(prefix, recursive=True)
-    except Exception as e:
-        logging.error(f"Failed to clean up benchmark files: {e}")
-
-
-def create_benchmark_cases_for_bucket(base_cases, bucket_name, bucket_tag):
-    new_cases = []
-
-    if not bucket_name:
-        return new_cases
-
-    for case in base_cases:
-        new_case = case.__class__(**case.__dict__)
-        new_case.bucket_name = bucket_name
-        new_case.bucket_type = bucket_tag
-        new_case.name = f"{case.name}_{bucket_tag}"
-        new_cases.append(new_case)
-    return new_cases
-
-
 def pytest_benchmark_generate_json(config, benchmarks, machine_info, commit_info):
     """
     Hook to post-process benchmark results before generating the JSON report.
@@ -144,3 +129,56 @@ def pytest_benchmark_generate_json(config, benchmarks, machine_info, commit_info
             del bench.extra_info["mean_time"]
             del bench.extra_info["median_time"]
             del bench.extra_info["stddev_time"]
+
+
+def with_file_sizes(sizes_in_bytes):
+    """
+    A decorator that generates benchmark cases for different file sizes.
+
+    It takes a list of base benchmark cases and creates variants for each
+    specified file size, updating the case name and file size parameter.
+    """
+
+    def decorator(base_cases_func):
+        def wrapper():
+            base_cases = base_cases_func()
+            new_cases = []
+            for case in base_cases:
+                for size_bytes in sizes_in_bytes:
+                    new_case = case.__class__(**case.__dict__)
+                    size_mb = size_bytes // MB
+                    new_case.file_size_bytes = size_bytes
+                    new_case.name = f"{case.name}_{size_mb}mb_file"
+                    new_cases.append(new_case)
+            return new_cases
+
+        return wrapper
+
+    return decorator
+
+
+def with_bucket_types(bucket_configs):
+    """
+    A decorator that generates benchmark cases for different bucket types.
+
+    It takes a list of base benchmark cases and creates variants for each
+    specified bucket, updating the case name and bucket parameters.
+    """
+
+    def decorator(base_cases_func):
+        def wrapper():
+            base_cases = base_cases_func()
+            all_cases = []
+            for case in base_cases:
+                for bucket_name, bucket_tag in bucket_configs:
+                    if bucket_name:  # Only create cases if bucket is specified
+                        new_case = case.__class__(**case.__dict__)
+                        new_case.bucket_name = bucket_name
+                        new_case.bucket_type = bucket_tag
+                        new_case.name = f"{case.name}_{bucket_tag}"
+                        all_cases.append(new_case)
+            return all_cases
+
+        return wrapper
+
+    return decorator

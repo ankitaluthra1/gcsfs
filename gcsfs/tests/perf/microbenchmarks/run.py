@@ -165,6 +165,7 @@ def _print_csv_to_shell(report_path):
         display_headers = [
             "Bucket Type",
             "Group",
+            "Pattern",
             "Files",
             "Threads",
             "Processes",
@@ -183,6 +184,7 @@ def _print_csv_to_shell(report_path):
                 [
                     row.get("bucket_type", ""),
                     row.get("group", ""),
+                    row.get("pattern", ""),
                     row.get("num_files", ""),
                     row.get("threads", ""),
                     row.get("processes", ""),
