@@ -1,8 +1,12 @@
 import logging
 import os
+import statistics
 import uuid
 
 import pytest
+
+MB = 1024 * 1024
+GB = 1024 * MB
 
 
 def publish_benchmark_extra_info(benchmark, params, benchmark_group):
@@ -22,6 +26,40 @@ def publish_benchmark_extra_info(benchmark, params, benchmark_group):
     benchmark.group = benchmark_group
 
 
+def publish_multi_process_benchmark_extra_info(benchmark, round_durations_s, params):
+    """
+    Calculate statistics for multi-process benchmarks and publish them
+    to extra_info.
+    """
+    if not round_durations_s:
+        return
+
+    min_time = min(round_durations_s)
+    max_time = max(round_durations_s)
+    mean_time = statistics.mean(round_durations_s)
+    median_time = statistics.median(round_durations_s)
+    stddev_time = (
+        statistics.stdev(round_durations_s) if len(round_durations_s) > 1 else 0.0
+    )
+
+    # Build the results table as a single multi-line string to log it cleanly.
+    results_table = (
+        f"\n{'-' * 90}\n"
+        f"{'Name (time in s)':<50s} {'Min':>8s} {'Max':>8s} {'Mean':>8s} {'Rounds':>8s}\n"
+        f"{'-' * 90}\n"
+        f"{params.name:<50s} {min_time:>8.4f} {max_time:>8.4f} {mean_time:>8.4f} {params.rounds:>8d}\n"
+        f"{'-' * 90}"
+    )
+    logging.info(f"Multi-process benchmark results:{results_table}")
+
+    benchmark.extra_info["timings"] = round_durations_s
+    benchmark.extra_info["min_time"] = min_time
+    benchmark.extra_info["max_time"] = max_time
+    benchmark.extra_info["mean_time"] = mean_time
+    benchmark.extra_info["median_time"] = median_time
+    benchmark.extra_info["stddev_time"] = stddev_time
+
+
 @pytest.fixture
 def gcsfs_benchmark_read_write(extended_gcs_factory, request):
     """
@@ -33,8 +71,6 @@ def gcsfs_benchmark_read_write(extended_gcs_factory, request):
     """
     params = request.param
     gcs = extended_gcs_factory(block_size=params.block_size_bytes)
-    if not gcs.exists(params.bucket_name):
-        gcs.mkdir(params.bucket_name)
 
     prefix = f"{params.bucket_name}/benchmark-files-{uuid.uuid4()}"
     file_paths = [f"{prefix}/file_{i}" for i in range(params.num_files)]
@@ -81,3 +117,30 @@ def create_benchmark_cases_for_bucket(base_cases, bucket_name, bucket_tag):
         new_case.name = f"{case.name}_{bucket_tag}"
         new_cases.append(new_case)
     return new_cases
+
+
+def pytest_benchmark_generate_json(config, benchmarks, machine_info, commit_info):
+    """
+    Hook to post-process benchmark results before generating the JSON report.
+
+    For multi-process benchmarks, we manually collect timings and store them
+    in `extra_info`. This hook uses these timings to correctly populate the
+    statistics (min, max, mean, and data) for the final benchmark report.
+    """
+    for bench in benchmarks:
+        if "timings" in bench.get("extra_info", {}):
+            bench.stats.data = bench.extra_info["timings"]
+            bench.stats.min = bench.extra_info["min_time"]
+            bench.stats.max = bench.extra_info["max_time"]
+            bench.stats.mean = bench.extra_info["mean_time"]
+            bench.stats.median = bench.extra_info["median_time"]
+            bench.stats.stddev = bench.extra_info["stddev_time"]
+            bench.stats.rounds = bench.extra_info["rounds"]
+
+            # Clean up extra_info to avoid redundant data in the report
+            del bench.extra_info["timings"]
+            del bench.extra_info["min_time"]
+            del bench.extra_info["max_time"]
+            del bench.extra_info["mean_time"]
+            del bench.extra_info["median_time"]
+            del bench.extra_info["stddev_time"]
