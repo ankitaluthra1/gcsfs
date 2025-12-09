@@ -11,30 +11,40 @@ import numpy as np
 from conftest import MB
 from prettytable import PrettyTable
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+
+def _setup_environment(args):
+    """Validates arguments and sets up environment variables for the benchmark run."""
+    # Validate that at least one bucket is provided
+    if not any([args.regional_bucket, args.zonal_bucket, args.hns_bucket]):
+        logging.error(
+            "At least one of --regional-bucket, --zonal-bucket, or --hns-bucket must be provided."
+        )
+        sys.exit(1)
+
+    # Set environment variables for buckets
+    os.environ["GCSFS_TEST_BUCKET"] = (
+        args.regional_bucket if args.regional_bucket else ""
+    )
+    os.environ["GCSFS_ZONAL_TEST_BUCKET"] = (
+        args.zonal_bucket if args.zonal_bucket else ""
+    )
+    os.environ["GCSFS_HNS_TEST_BUCKET"] = args.hns_bucket if args.hns_bucket else ""
+    os.environ["GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT"] = "true"
+    os.environ["STORAGE_EMULATOR_HOST"] = "https://storage.googleapis.com"
+
+    if args.config:
+        os.environ["GCSFS_BENCHMARK_FILTER"] = args.config
 
 
-def run_benchmarks(results_dir, group_name=None, config_name=None, test_name=None):
+def _run_benchmarks(results_dir, args):
     """
     Sets environment variables and runs pytest for the specified benchmark group.
     """
-    logging.info(f"Starting benchmark run for group: {group_name}")
-
-    # Set environment variables for the benchmark run
-    env = os.environ.copy()
-    env["GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT"] = "true"
-    env["STORAGE_EMULATOR_HOST"] = "https://storage.googleapis.com"
-
-    # Set benchmark filter if config name is passed
-    if config_name:
-        env["GCSFS_BENCHMARK_FILTER"] = config_name
+    logging.info(f"Starting benchmark run for group: {args.group}")
 
     base_path = os.path.dirname(__file__)
-
-    if group_name:
-        benchmark_path = os.path.join(base_path, group_name)
+    if args.group:
+        benchmark_path = os.path.join(base_path, args.group)
         if not os.path.isdir(benchmark_path):
             logging.error(f"Benchmark group directory not found: {benchmark_path}")
             sys.exit(1)
@@ -49,17 +59,26 @@ def run_benchmarks(results_dir, group_name=None, config_name=None, test_name=Non
         "pytest",
         benchmark_path,
         f"--benchmark-json={json_output_path}",
-        "-o",
-        "log_cli=true",
     ]
 
-    if test_name:
+    if args.log:
+        pytest_command.extend(
+            [
+                "-o",
+                f"log_cli={args.log}",
+                "-o",
+                f"log_cli_level={args.log_level.upper()}",
+            ]
+        )
+
+    if args.name:
         pytest_command.append("-k")
-        pytest_command.append(test_name)
+        pytest_command.append(args.name)
 
     logging.info(f"Executing command: {' '.join(pytest_command)}")
 
     try:
+        env = os.environ.copy()
         subprocess.run(pytest_command, check=True, env=env, text=True)
         logging.info(f"Benchmark run completed. Results saved to {json_output_path}")
         return json_output_path
@@ -73,7 +92,7 @@ def run_benchmarks(results_dir, group_name=None, config_name=None, test_name=Non
         sys.exit(1)
 
 
-def generate_report(json_path, results_dir):
+def _generate_report(json_path, results_dir):
     """
     Parses the benchmark JSON output and generates a CSV summary report.
     """
@@ -129,31 +148,59 @@ def generate_report(json_path, results_dir):
     return report_path
 
 
-def print_csv_to_shell(report_path):
+def _print_csv_to_shell(report_path):
     """
     Reads a CSV file and prints its contents to the shell as a formatted table.
     """
     try:
         with open(report_path, "r") as f:
-            reader = csv.reader(f)
+            reader = csv.DictReader(f)
             rows = list(reader)
+
         if not rows:
             logging.info("No data to display.")
             return
 
+        # Define the headers for the output table
+        display_headers = [
+            "Bucket Type",
+            "Group",
+            "Files",
+            "Threads",
+            "Processes",
+            "File Size (MB)",
+            "Chunk Size (MB)",
+            "Block Size (MB)",
+            "Min Latency (s)",
+            "Mean Latency (s)",
+            "Max Throughput(MB/s)",
+        ]
         table = PrettyTable()
-        table.field_names = rows[0]
-        for row in rows[1:]:
-            table.add_row(row)
+        table.field_names = display_headers
+
+        for row in rows:
+            table.add_row(
+                [
+                    row.get("bucket_type", ""),
+                    row.get("group", ""),
+                    row.get("num_files", ""),
+                    row.get("threads", ""),
+                    row.get("processes", ""),
+                    f"{float(row.get('file_size', 0)) / MB:.2f}",
+                    f"{float(row.get('chunk_size', 0)) / MB:.2f}",
+                    f"{float(row.get('block_size', 0)) / MB:.2f}",
+                    f"{float(row.get('min', 0)):.4f}",
+                    f"{float(row.get('mean', 0)):.4f}",
+                    row.get("max_throughput_MB/s", ""),
+                ]
+            )
         print(table)
     except FileNotFoundError:
         logging.error(f"Report file not found at: {report_path}")
 
 
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-    )
+def main():
+    """Main entry point for the benchmark execution script."""
     parser = argparse.ArgumentParser(description="Run GCSFS performance benchmarks.")
     parser.add_argument(
         "--group",
@@ -165,7 +212,31 @@ if __name__ == "__main__":
     parser.add_argument(
         "--name", help="A keyword to filter tests by name (passed to pytest -k)."
     )
+    parser.add_argument(
+        "--regional-bucket",
+        help="Name of the regional GCS bucket to use for benchmarks.",
+    )
+    parser.add_argument(
+        "--zonal-bucket",
+        help="Name of the zonal GCS bucket to use for benchmarks.",
+    )
+    parser.add_argument(
+        "--hns-bucket",
+        help="Name of the HNS GCS bucket to use for benchmarks.",
+    )
+    parser.add_argument(
+        "--log",
+        default="false",
+        help="Enable pytest console logging (log_cli=true).",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="DEBUG",
+        help="Set pytest console logging level (e.g., DEBUG, INFO, WARNING). Only effective if --log is enabled.",
+    )
     args = parser.parse_args()
+
+    _setup_environment(args)
 
     # Create results directory
     timestamp = datetime.now().strftime("%d%m%Y-%H%M%S")
@@ -173,8 +244,15 @@ if __name__ == "__main__":
     os.makedirs(results_dir, exist_ok=True)
 
     # Run benchmarks and generate report
-    json_result_path = run_benchmarks(results_dir, args.group, args.config, args.name)
+    json_result_path = _run_benchmarks(results_dir, args)
     if json_result_path:
-        csv_report_path = generate_report(json_result_path, results_dir)
+        csv_report_path = _generate_report(json_result_path, results_dir)
         if csv_report_path:
-            print_csv_to_shell(csv_report_path)
+            _print_csv_to_shell(csv_report_path)
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    )
+    main()
