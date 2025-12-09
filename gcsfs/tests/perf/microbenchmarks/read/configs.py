@@ -1,74 +1,70 @@
 from gcsfs.tests.perf.microbenchmarks.conftest import (
+    GB,
     MB,
-    create_benchmark_cases_for_bucket,
+    with_bucket_types,
+    with_file_sizes,
 )
 from gcsfs.tests.perf.microbenchmarks.read.parameters import ReadBenchmarkParameters
 from gcsfs.tests.perf.microbenchmarks.settings import BENCHMARK_FILTER
 from gcsfs.tests.settings import TEST_BUCKET, TEST_ZONAL_BUCKET
 
-# Base configurations for benchmarks. These will be run against each bucket type.
+# Base configurations for benchmarks.
+# These will be run against each bucket type and various file sizes using the decorators.
 _base_read_benchmark_cases = [
-    # Single-threaded sequential read of single 128MB file
+    # Single-threaded sequential read
     ReadBenchmarkParameters(
-        name="read_seq_1thread_128mb_file",
+        name="read_seq_1thread",
         num_files=1,
         pattern="seq",
     ),
-    # Single-threaded random read of single 128MB file
+    # Single-threaded random read
     ReadBenchmarkParameters(
-        name="read_rand_1thread_128mb_file",
+        name="read_rand_1thread",
         num_files=1,
-        file_size_bytes=128 * MB,
         pattern="rand",
     ),
-    # Multi-threaded sequential read of 16 x 128MB files
+    # Multi-threaded sequential read
     ReadBenchmarkParameters(
-        name="read_seq_16threads_16x128mb_files",
+        name="read_seq_16threads_16files",
         num_files=16,
-        file_size_bytes=128 * MB,
         num_threads=16,
         pattern="seq",
     ),
-    # Multi-threaded random read of 16 x 128MB files
+    # Multi-threaded random read
     ReadBenchmarkParameters(
-        name="read_rand_16threads_16x128mb_files",
+        name="read_rand_16threads_16files",
         num_files=16,
-        file_size_bytes=128 * MB,
         num_threads=16,
         pattern="rand",
     ),
-    # Multi-process, multi-threaded sequential read of 16 128MB files by 4 processes and 4 threads per process
+    # Multi-process, multi-threaded sequential read
     ReadBenchmarkParameters(
-        name="read_seq_4procs_4threads_16x128mb_files",
+        name="read_seq_4procs_4threads_16files",
         num_files=16,
-        file_size_bytes=128 * MB,
         num_threads=4,
         num_processes=4,
         pattern="seq",
     ),
-    # Multi-process, multi-threaded random read of 16 x 128MB files by 4 processes and 4 threads per process
+    # Multi-process, multi-threaded random read
     ReadBenchmarkParameters(
-        name="read_rand_4procs_4threads_16x128mb_files",
+        name="read_rand_4procs_4threads_16files",
         num_files=16,
-        file_size_bytes=128 * MB,
         num_threads=4,
         num_processes=4,
         pattern="rand",
     ),
-    # Multi-process, single-threaded sequential read of 16 128MB files by 16 processes
+    # Multi-process, single-threaded sequential read
     ReadBenchmarkParameters(
-        name="read_seq_16procs_1thread_16x128mb_files",
+        name="read_seq_16procs_1thread_16files",
         num_files=16,
-        file_size_bytes=128 * MB,
         num_threads=1,
         num_processes=16,
         pattern="seq",
     ),
-    # Multi-process, multi-threaded random read of 16 x 128MB files by 16 processes
+    # Multi-process, single-threaded random read
     ReadBenchmarkParameters(
-        name="read_rand_4procs_4threads_16x128mb_files",
+        name="read_rand_16procs_1thread_16files",
         num_files=16,
-        file_size_bytes=128 * MB,
         num_threads=1,
         num_processes=16,
         pattern="rand",
@@ -76,16 +72,19 @@ _base_read_benchmark_cases = [
 ]
 
 
+@with_file_sizes([128 * MB, 1 * GB])
+@with_bucket_types(
+    [
+        (TEST_BUCKET, "regional"),
+        (TEST_ZONAL_BUCKET, "zonal"),
+    ]
+)
 def get_read_benchmark_cases():
     """
-    Get the full list of test cases from the common configuration with regional and zonal bucket name
+    Generates the full list of read benchmark test cases by applying
+    file size and bucket type variations to a set of base configurations.
     """
-    all_cases = create_benchmark_cases_for_bucket(
-        _base_read_benchmark_cases, TEST_BUCKET, "regional"
-    ) + create_benchmark_cases_for_bucket(
-        _base_read_benchmark_cases, TEST_ZONAL_BUCKET, "zonal"
-    )
-
+    all_cases = _base_read_benchmark_cases
     filter_name = BENCHMARK_FILTER
 
     if filter_name:
