@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from gcsfs.tests.perf.microbenchmarks.conftest import (
+from gcsfs.tests.perf.microbenchmarks.benchmark_helpers import (
     publish_benchmark_extra_info,
     publish_multi_process_benchmark_extra_info,
 )

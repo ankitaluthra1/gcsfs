@@ -8,7 +8,7 @@ import sys
 from datetime import datetime
 
 import numpy as np
-from conftest import MB
+from benchmark_helpers import MB
 from prettytable import PrettyTable
 
 

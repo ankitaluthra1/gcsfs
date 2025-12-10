@@ -29,8 +29,8 @@ The read benchmarks are defined by the `ReadBenchmarkParameters` class in `read/
 *   `pattern`: Read pattern, either sequential (`seq`) or random (`rand`).
 *   `num_threads`: Number of threads for multi-threaded tests.
 *   `num_processes`: Number of processes for multi-process tests.
-*   `block_size_bytes`: The block size for gcsfs file buffering.
-*   `chunk_size_bytes`: The size of each read operation.
+*   `block_size_bytes`: The block size for gcsfs file buffering. Defaults to `16MB`.
+*   `chunk_size_bytes`: The size of each read operation. Defaults to `16MB`.
 *   `file_size_bytes`: The total size of each file.
 
 ### Configurations
@@ -45,17 +45,6 @@ These base configurations are defined in `read/configs.py`. They are then parame
 
 *   `@with_bucket_types`: This decorator creates benchmark variants for different GCS bucket types (e.g., regional, zonal).
 *   `@with_file_sizes`: This decorator creates variants for different file sizes, which are configured via the `GCSFS_BENCHMARK_FILE_SIZES` environment variable.
-
-### Environment Setup for `pytest`
-
-When running benchmarks directly with `pytest`, you must set the following environment variables. The orchestrator script (`run.py`) handles this automatically.
-
-```bash
-export STORAGE_EMULATOR_HOST="https://storage.googleapis.com"
-export GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT="true"
-```
-
-These ensure that the benchmarks run against the live GCS API and that experimental features are enabled.
 
 ### Running Benchmarks with `pytest`
 
@@ -107,21 +96,24 @@ def test_read_single_threaded(benchmark, gcsfs_benchmark_read_write):
     # ... benchmark logic ...
 ```
 
-## Settings
-
-To run the benchmarks, you need to configure your environment.
-
 ### Environment Variables
-
+To run the benchmarks, you need to configure your environment.
 The orchestrator script (`run.py`) sets these for you, but if you are running `pytest` directly, you will need to export them.
 
 *   `GCSFS_TEST_BUCKET`: The name of a regional GCS bucket.
 *   `GCSFS_ZONAL_TEST_BUCKET`: The name of a zonal GCS bucket.
 *   `GCSFS_HNS_TEST_BUCKET`: The name of an HNS-enabled GCS bucket.
 
+You must also set the following environment variables to ensure that the benchmarks run against the live GCS API and that experimental features are enabled.
+
+```bash
+export STORAGE_EMULATOR_HOST="https://storage.googleapis.com"
+export GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT="true"
+```
+
 ### `settings.py`
 
-The `gcsfs/tests/perf/microbenchmarks/settings.py` file defines how benchmark parameters can be configured through environment variables:
+The `gcsfs/tests/perf/settings.py` file defines how benchmark parameters can be configured through environment variables:
 
 *   `GCSFS_BENCHMARK_FILTER`: A string used to filter which benchmark configurations to run by name.
 *   `GCSFS_BENCHMARK_FILE_SIZES`: A comma-separated list of file sizes in MB (e.g., "128,1024"). Defaults to "128".
