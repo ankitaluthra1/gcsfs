@@ -7,7 +7,16 @@ from typing import Any, Callable, List, Tuple
 
 import pytest
 
+from gcsfs.tests.settings import BENCHMARK_SKIP_TESTS
+
 MB = 1024 * 1024
+
+pytestmark = pytest.mark.skipif(
+    BENCHMARK_SKIP_TESTS,
+    reason="""Skipping benchmark tests.
+Set GCSFS_BENCHMARK_SKIP_TESTS=false to run them,
+or use the orchestrator script at gcsfs/tests/perf/microbenchmarks/run.py""",
+)
 
 
 @pytest.fixture
