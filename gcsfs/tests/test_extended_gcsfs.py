@@ -14,7 +14,12 @@ from google.cloud.storage._experimental.asyncio.async_multi_range_downloader imp
 from google.cloud.storage.exceptions import DataCorruption
 
 from gcsfs.extended_gcsfs import BucketType
-from gcsfs.tests.conftest import csv_files, files, text_files
+from gcsfs.tests.conftest import (
+    _MULTI_THREADED_TEST_DATA_SIZE,
+    csv_files,
+    files,
+    text_files,
+)
 from gcsfs.tests.settings import TEST_ZONAL_BUCKET
 
 file = "test/accounts.1.json"
@@ -25,9 +30,9 @@ file_size = len(json_data)
 
 REQUIRED_ENV_VAR = "GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT"
 
-a = TEST_ZONAL_BUCKET + "/tmp/test/a"
-b = TEST_ZONAL_BUCKET + "/tmp/test/b"
-c = TEST_ZONAL_BUCKET + "/tmp/test/c"
+a = TEST_ZONAL_BUCKET + "/zonal/test/a"
+b = TEST_ZONAL_BUCKET + "/zonal/test/b"
+c = TEST_ZONAL_BUCKET + "/zonal/test/c"
 
 # If the condition is True, only then tests in this file are run.
 should_run = os.getenv(REQUIRED_ENV_VAR, "false").lower() in (
@@ -183,13 +188,7 @@ def test_readline_zb(extended_gcsfs, zonal_mocks):
 
 
 def test_readline_from_cache_zb(extended_gcsfs, zonal_mocks):
-    data = b"a,b\n11,22\n3,4"
-    if not extended_gcsfs.on_google:
-        with mock.patch.object(
-            extended_gcsfs, "_sync_lookup_bucket_type", return_value=BucketType.UNKNOWN
-        ):
-            with extended_gcsfs.open(a, "wb") as f:
-                f.write(data)
+    data = text_files["zonal/test/a"]
     with zonal_mocks(data):
         with extended_gcsfs.open(a, "rb") as f:
             result = f.readline()
@@ -209,13 +208,7 @@ def test_readline_from_cache_zb(extended_gcsfs, zonal_mocks):
 
 
 def test_readline_empty_zb(extended_gcsfs, zonal_mocks):
-    data = b""
-    if not extended_gcsfs.on_google:
-        with mock.patch.object(
-            extended_gcsfs, "_sync_lookup_bucket_type", return_value=BucketType.UNKNOWN
-        ):
-            with extended_gcsfs.open(b, "wb") as f:
-                f.write(data)
+    data = text_files["zonal/test/b"]
     with zonal_mocks(data):
         with extended_gcsfs.open(b, "rb") as f:
             result = f.readline()
@@ -223,13 +216,7 @@ def test_readline_empty_zb(extended_gcsfs, zonal_mocks):
 
 
 def test_readline_blocksize_zb(extended_gcsfs, zonal_mocks):
-    data = b"ab\n" + b"a" * (2**18) + b"\nab"
-    if not extended_gcsfs.on_google:
-        with mock.patch.object(
-            extended_gcsfs, "_sync_lookup_bucket_type", return_value=BucketType.UNKNOWN
-        ):
-            with extended_gcsfs.open(c, "wb") as f:
-                f.write(data)
+    data = text_files["zonal/test/c"]
     with zonal_mocks(data):
         with extended_gcsfs.open(c, "rb", block_size=2**18) as f:
             result = f.readline()
@@ -315,10 +302,9 @@ def _generate_large_test_data(size_bytes):
     return pattern * (size_bytes // len(pattern)) + pattern[: size_bytes % len(pattern)]
 
 
-_MULTI_THREADED_TEST_DATA_SIZE = 5 * 1024 * 1024  # 5MB
-_MULTI_THREADED_TEST_DATA = _generate_large_test_data(_MULTI_THREADED_TEST_DATA_SIZE)
-
-_MULTI_THREADED_TEST_FILE_PATH = f"{TEST_ZONAL_BUCKET}/multi_threaded_test_file"
+_MULTI_THREADED_TEST_FILE = "multi_threaded_test_file"
+_MULTI_THREADED_TEST_DATA = text_files[_MULTI_THREADED_TEST_FILE]
+_MULTI_THREADED_TEST_FILE_PATH = f"{TEST_ZONAL_BUCKET}/{_MULTI_THREADED_TEST_FILE}"
 
 _TEST_BLOCK_SIZE_FOR_CHUNK_BOUNDARY = 1 * 1024 * 1024  # 1MB
 _NUM_CONCURRENCY_THREADS = 30
@@ -350,15 +336,6 @@ def test_multithreaded_read_disjoint_ranges_zb(extended_gcsfs, zonal_mocks):
     Tests concurrent reads of disjoint ranges from the same file.
     Verifies that different parts of the file can be fetched simultaneously without data mix-up.
     """
-    if not extended_gcsfs.on_google:
-        with mock.patch.object(
-            extended_gcsfs,
-            "_sync_lookup_bucket_type",
-            return_value=BucketType.UNKNOWN,
-        ):
-            with extended_gcsfs.open(_MULTI_THREADED_TEST_FILE_PATH, "wb") as f:
-                f.write(_MULTI_THREADED_TEST_DATA)
-
     with zonal_mocks(_MULTI_THREADED_TEST_DATA) as mocks:
         read_tasks = [
             (extended_gcsfs, _MULTI_THREADED_TEST_FILE_PATH, 0, 1024),
@@ -384,15 +361,6 @@ def test_multithreaded_read_overlapping_ranges_zb(extended_gcsfs, zonal_mocks):
     """
     Tests concurrent reads of overlapping ranges from the same file.
     """
-    if not extended_gcsfs.on_google:
-        with mock.patch.object(
-            extended_gcsfs,
-            "_sync_lookup_bucket_type",
-            return_value=BucketType.UNKNOWN,
-        ):
-            with extended_gcsfs.open(_MULTI_THREADED_TEST_FILE_PATH, "wb") as f:
-                f.write(_MULTI_THREADED_TEST_DATA)
-
     with zonal_mocks(_MULTI_THREADED_TEST_DATA) as mocks:
         read_tasks = [
             (extended_gcsfs, _MULTI_THREADED_TEST_FILE_PATH, 0, 2048),
@@ -429,15 +397,6 @@ def test_multithreaded_read_chunk_boundary_zb(extended_gcsfs, zonal_mocks):
     Tests concurrent reads that straddle internal buffering chunk boundaries.
     Verifies correct stitching of data from multiple internal requests.
     """
-    if not extended_gcsfs.on_google:
-        with mock.patch.object(
-            extended_gcsfs,
-            "_sync_lookup_bucket_type",
-            return_value=BucketType.UNKNOWN,
-        ):
-            with extended_gcsfs.open(_MULTI_THREADED_TEST_FILE_PATH, "wb") as f:
-                f.write(_MULTI_THREADED_TEST_DATA)
-
     with zonal_mocks(_MULTI_THREADED_TEST_DATA) as mocks:
         # Read ranges that straddle _TEST_BLOCK_SIZE boundaries
         read_tasks = [
@@ -515,15 +474,6 @@ def test_multithreaded_read_high_concurrency_zb(extended_gcsfs, zonal_mocks):
     Tests high-concurrency reads to stress the connection pooling and handling.
     Verifies that many concurrent requests do not lead to crashes or deadlocks.
     """
-    if not extended_gcsfs.on_google:
-        with mock.patch.object(
-            extended_gcsfs,
-            "_sync_lookup_bucket_type",
-            return_value=BucketType.UNKNOWN,
-        ):
-            with extended_gcsfs.open(_MULTI_THREADED_TEST_FILE_PATH, "wb") as f:
-                f.write(_MULTI_THREADED_TEST_DATA)
-
     with zonal_mocks(_MULTI_THREADED_TEST_DATA) as mocks:
         read_tasks = [
             (
@@ -559,14 +509,6 @@ def test_multithreaded_read_one_fails_others_survive_zb(extended_gcsfs, zonal_mo
     """
     if extended_gcsfs.on_google:
         pytest.skip("Cannot mock failures on real GCS")
-
-    with mock.patch.object(
-        extended_gcsfs,
-        "_sync_lookup_bucket_type",
-        return_value=BucketType.UNKNOWN,
-    ):
-        with extended_gcsfs.open(_MULTI_THREADED_TEST_FILE_PATH, "wb") as f:
-            f.write(_MULTI_THREADED_TEST_DATA)
 
     with zonal_mocks(_MULTI_THREADED_TEST_DATA) as mocks:
         original_download_ranges_side_effect = mocks[
