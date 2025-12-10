@@ -1,7 +1,4 @@
-from gcsfs.tests.perf.microbenchmarks.benchmark_helpers import (
-    with_bucket_types,
-    with_file_sizes,
-)
+from gcsfs.tests.perf.microbenchmarks.conftest import with_bucket_types, with_file_sizes
 from gcsfs.tests.perf.microbenchmarks.read.parameters import ReadBenchmarkParameters
 from gcsfs.tests.settings import BENCHMARK_FILTER, TEST_BUCKET
 

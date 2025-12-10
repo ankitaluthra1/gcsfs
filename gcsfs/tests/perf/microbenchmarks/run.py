@@ -8,8 +8,9 @@ import sys
 from datetime import datetime
 
 import numpy as np
-from benchmark_helpers import MB
 from prettytable import PrettyTable
+
+from gcsfs.tests.perf.microbenchmarks.conftest import MB
 
 
 def _setup_environment(args):
