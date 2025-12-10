@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from gcsfs.tests.perf.microbenchmarks.conftest import MB
+from gcsfs.tests.perf.microbenchmarks.benchmark_helpers import MB
 
 
 @dataclass

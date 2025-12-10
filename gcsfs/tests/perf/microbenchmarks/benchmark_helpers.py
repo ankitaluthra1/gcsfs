@@ -1,59 +1,14 @@
 import logging
-import os
 import statistics
 import sys
-import uuid
-
-import pytest
+from typing import Any, Callable, List, Tuple
 
 MB = 1024 * 1024
 
 
-@pytest.fixture
-def gcsfs_benchmark_read_write(extended_gcs_factory, request):
-    """
-    A fixture that creates temporary files for a benchmark run and cleans
-    them up afterward.
-
-    It uses the `BenchmarkParameters` object from the test's parametrization
-    to determine how many files to create and of what size.
-    """
-    params = request.param
-    gcs = extended_gcs_factory(block_size=params.block_size_bytes)
-
-    prefix = f"{params.bucket_name}/benchmark-files-{uuid.uuid4()}"
-    file_paths = [f"{prefix}/file_{i}" for i in range(params.num_files)]
-
-    logging.info(
-        f"Setting up benchmark '{params.name}': creating {params.num_files} file(s) "
-        f"of size {params.file_size_bytes / 1024 / 1024:.2f} MB each."
-    )
-
-    # Define a 16MB chunk size for writing
-    chunk_size = 16 * 1024 * 1024
-    chunks_to_write = params.file_size_bytes // chunk_size
-    remainder = params.file_size_bytes % chunk_size
-
-    # Create files by writing random chunks to avoid high memory usage
-    for path in file_paths:
-        logging.info(f"Creating file {path}.")
-        with gcs.open(path, "wb") as f:
-            for _ in range(chunks_to_write):
-                f.write(os.urandom(chunk_size))
-            if remainder > 0:
-                f.write(os.urandom(remainder))
-
-    yield gcs, file_paths, params
-
-    # --- Teardown ---
-    logging.info(f"Tearing down benchmark '{params.name}': deleting files.")
-    try:
-        gcs.rm(prefix, recursive=True)
-    except Exception as e:
-        logging.error(f"Failed to clean up benchmark files: {e}")
-
-
-def publish_benchmark_extra_info(benchmark, params, benchmark_group):
+def publish_benchmark_extra_info(
+    benchmark: Any, params: Any, benchmark_group: str
+) -> None:
     """
     Helper function to publish benchmark parameters to the extra_info property.
     """
@@ -70,7 +25,9 @@ def publish_benchmark_extra_info(benchmark, params, benchmark_group):
     benchmark.group = benchmark_group
 
 
-def publish_multi_process_benchmark_extra_info(benchmark, round_durations_s, params):
+def publish_multi_process_benchmark_extra_info(
+    benchmark: Any, round_durations_s: List[float], params: Any
+) -> None:
     """
     Calculate statistics for multi-process benchmarks and publish them
     to extra_info.
@@ -104,41 +61,14 @@ def publish_multi_process_benchmark_extra_info(benchmark, round_durations_s, par
     benchmark.extra_info["stddev_time"] = stddev_time
 
 
-def pytest_benchmark_generate_json(config, benchmarks, machine_info, commit_info):
-    """
-    Hook to post-process benchmark results before generating the JSON report.
-
-    For multi-process benchmarks, we manually collect timings and store them
-    in `extra_info`. This hook uses these timings to correctly populate the
-    statistics (min, max, mean, and data) for the final benchmark report.
-    """
-    for bench in benchmarks:
-        if "timings" in bench.get("extra_info", {}):
-            bench.stats.data = bench.extra_info["timings"]
-            bench.stats.min = bench.extra_info["min_time"]
-            bench.stats.max = bench.extra_info["max_time"]
-            bench.stats.mean = bench.extra_info["mean_time"]
-            bench.stats.median = bench.extra_info["median_time"]
-            bench.stats.stddev = bench.extra_info["stddev_time"]
-            bench.stats.rounds = bench.extra_info["rounds"]
-
-            # Clean up extra_info to avoid redundant data in the report
-            del bench.extra_info["timings"]
-            del bench.extra_info["min_time"]
-            del bench.extra_info["max_time"]
-            del bench.extra_info["mean_time"]
-            del bench.extra_info["median_time"]
-            del bench.extra_info["stddev_time"]
-
-
-def with_file_sizes(base_cases_func):
+def with_file_sizes(base_cases_func: Callable) -> Callable:
     """
     A decorator that generates benchmark cases for different file sizes.
 
     It reads file sizes from the BENCHMARK_FILE_SIZES_MB setting and creates
     variants for each specified size, updating the case name and file size parameter.
     """
-    from gcsfs.tests.perf.microbenchmarks.settings import BENCHMARK_FILE_SIZES_MB
+    from gcsfs.tests.settings import BENCHMARK_FILE_SIZES_MB
 
     if not BENCHMARK_FILE_SIZES_MB:
         logging.error("No file sizes defined. Please set GCSFS_BENCHMARK_FILE_SIZES.")
@@ -158,12 +88,13 @@ def with_file_sizes(base_cases_func):
     return wrapper
 
 
-def with_bucket_types(bucket_configs):
+def with_bucket_types(bucket_configs: List[Tuple[str, str]]) -> Callable:
     """
     A decorator that generates benchmark cases for different bucket types.
 
-    It takes a list of base benchmark cases and creates variants for each
-    specified bucket, updating the case name and bucket parameters.
+    Args:
+        bucket_configs: A list of tuples, where each tuple contains the
+                        bucket name and a descriptive tag (e.g., "regional").
     """
 
     def decorator(base_cases_func):
