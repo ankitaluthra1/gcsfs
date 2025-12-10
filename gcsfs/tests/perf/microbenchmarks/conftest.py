@@ -1,9 +1,80 @@
 import logging
+import os
 import statistics
 import sys
+import uuid
 from typing import Any, Callable, List, Tuple
 
+import pytest
+
 MB = 1024 * 1024
+
+
+@pytest.fixture
+def gcsfs_benchmark_read_write(extended_gcs_factory, request):
+    """
+    A fixture that creates temporary files for a benchmark run and cleans
+    them up afterward.
+
+    It uses the `BenchmarkParameters` object from the test's parametrization
+    to determine how many files to create and of what size.
+    """
+    params = request.param
+    gcs = extended_gcs_factory(block_size=params.block_size_bytes)
+
+    prefix = f"{params.bucket_name}/benchmark-files-{uuid.uuid4()}"
+    file_paths = [f"{prefix}/file_{i}" for i in range(params.num_files)]
+
+    logging.info(
+        f"Setting up benchmark '{params.name}': creating {params.num_files} file(s) "
+        f"of size {params.file_size_bytes / 1024 / 1024:.2f} MB each."
+    )
+
+    # Define a 16MB chunk size for writing
+    chunk_size = 16 * 1024 * 1024
+    chunks_to_write = params.file_size_bytes // chunk_size
+    remainder = params.file_size_bytes % chunk_size
+
+    # Create files by writing random chunks to avoid high memory usage
+    for path in file_paths:
+        logging.info(f"Creating file {path}.")
+        with gcs.open(path, "wb") as f:
+            for _ in range(chunks_to_write):
+                f.write(os.urandom(chunk_size))
+            if remainder > 0:
+                f.write(os.urandom(remainder))
+
+    yield gcs, file_paths, params
+
+    # --- Teardown ---
+    logging.info(f"Tearing down benchmark '{params.name}': deleting files.")
+    try:
+        gcs.rm(prefix, recursive=True)
+    except Exception as e:
+        logging.error(f"Failed to clean up benchmark files: {e}")
+
+
+def pytest_benchmark_generate_json(config, benchmarks, machine_info, commit_info):
+    """
+    Hook to post-process benchmark results before generating the JSON report.
+    """
+    for bench in benchmarks:
+        if "timings" in bench.get("extra_info", {}):
+            bench.stats.data = bench.extra_info["timings"]
+            bench.stats.min = bench.extra_info["min_time"]
+            bench.stats.max = bench.extra_info["max_time"]
+            bench.stats.mean = bench.extra_info["mean_time"]
+            bench.stats.median = bench.extra_info["median_time"]
+            bench.stats.stddev = bench.extra_info["stddev_time"]
+            bench.stats.rounds = bench.extra_info["rounds"]
+
+            del bench.extra_info["timings"]
+            del bench.extra_info["min_time"]
+            del bench.extra_info["max_time"]
+            del bench.extra_info["mean_time"]
+            del bench.extra_info["median_time"]
+            del bench.extra_info["stddev_time"]
+            del bench.extra_info["rounds"]
 
 
 def publish_benchmark_extra_info(
