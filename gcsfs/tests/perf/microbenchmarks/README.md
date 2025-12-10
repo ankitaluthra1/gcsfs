@@ -46,6 +46,17 @@ These base configurations are defined in `read/configs.py`. They are then parame
 *   `@with_bucket_types`: This decorator creates benchmark variants for different GCS bucket types (e.g., regional, zonal).
 *   `@with_file_sizes`: This decorator creates variants for different file sizes, which are configured via the `GCSFS_BENCHMARK_FILE_SIZES` environment variable.
 
+### Environment Setup for `pytest`
+
+When running benchmarks directly with `pytest`, you must set the following environment variables. The orchestrator script (`run.py`) handles this automatically.
+
+```bash
+export STORAGE_EMULATOR_HOST="https://storage.googleapis.com"
+export GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT="true"
+```
+
+These ensure that the benchmarks run against the live GCS API and that experimental features are enabled.
+
 ### Running Benchmarks with `pytest`
 
 You can use `pytest` to run the benchmarks directly. The `-k` option is useful for filtering tests by name.
@@ -64,6 +75,12 @@ pytest -k "test_read_single_threaded" gcsfs/tests/perf/microbenchmarks/read/
 
 Run multi-process benchmarks for a specific configuration (e.g., 4 processes, 4 threads):
 ```bash
+pytest -k "read_seq_4procs_4threads" gcsfs/tests/perf/microbenchmarks/read/
+```
+
+Run a specific benchmark configuration by setting `GCSFS_BENCHMARK_FILTER`. This is useful for targeting a single configuration defined in `read/configs.py`.
+```bash
+export GCSFS_BENCHMARK_FILTER="read_seq_1thread"
 pytest -k "read_seq_4procs_4threads" gcsfs/tests/perf/microbenchmarks/read/
 ```
 
@@ -120,12 +137,16 @@ The script accepts several command-line arguments:
 *   `--group`: The benchmark group to run (e.g., `read`).
 *   `--config`: The name of a specific benchmark configuration to run.
 *   `--name`: A keyword to filter tests by name (passed to `pytest -k`).
-*   `--regional-bucket`: Name of the regional GCS bucket.
-*   `--zonal-bucket`: Name of the zonal GCS bucket.
+*   `--regional-bucket`: Name of the Regional GCS bucket.
+*   `--zonal-bucket`: Name of the Zonal GCS bucket.
 *   `--hns-bucket`: Name of the HNS GCS bucket.
 *   `--file-sizes`: A space-separated list of file sizes in MB (e.g., `--file-sizes 128 1024`).
 *   `--log`: Set to `true` to enable `pytest` console logging.
 *   `--log-level`: Sets the log level (e.g., `INFO`, `DEBUG`).
+
+**Important Notes:**
+*   You must provide at least one bucket name (`--regional-bucket`, `--zonal-bucket`, or `--hns-bucket`).
+*   If the `--file-sizes` argument is not provided, the script will default to using a 128MB file size for all benchmarks.
 
 Run the script with `--help` to see all available options:
 ```bash
@@ -136,7 +157,12 @@ python gcsfs/tests/perf/microbenchmarks/run.py --help
 
 Here are some examples of how to use the orchestrator script from the root of the `gcsfs` repository:
 
-Run all read benchmarks against a regional bucket with the default 128MB file size:
+Run all available benchmarks against a regional bucket with default settings. This is the simplest way to trigger all tests across all groups (e.g., read, write):
+```bash
+python gcsfs/tests/perf/microbenchmarks/run.py --regional-bucket your-regional-bucket
+```
+
+Run only the `read` group benchmarks against a regional bucket with the default 128MB file size:
 ```bash
 python gcsfs/tests/perf/microbenchmarks/run.py --group read --regional-bucket your-regional-bucket
 ```
