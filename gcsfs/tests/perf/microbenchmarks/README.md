@@ -176,4 +176,35 @@ python gcsfs/tests/perf/microbenchmarks/run.py \
   --zonal-bucket your-zonal-bucket
 ```
 
+### Script Output
+
 The script will create a timestamped directory in `gcsfs/tests/perf/microbenchmarks/__run__/` containing the JSON and CSV results, and it will print a summary table to the console.
+
+#### JSON File (`results.json`)
+
+The `results.json` file will contain a structured representation of the benchmark results.
+The exact content can vary depending on the pytest-benchmark version and the tests run, but it typically includes:
+*   machine_info: Details about the system where the benchmarks were run (e.g., Python version, OS, CPU).
+*   benchmarks: A list of individual benchmark results, each containing:
+*     name: The name of the benchmark test.
+*     stats: Performance statistics like min, max, mean, stddev, rounds, iterations, ops (operations per second), q1, q3 (quartiles).
+*     options: Configuration options used for the benchmark (e.g., min_rounds, max_time).
+*     extra_info: Any additional information associated with the benchmark.
+
+#### CSV File (`results.csv`)
+The CSV file provides a detailed performance profile of gcsfs operations, allowing for analysis of how different factors like threading, process parallelism, and access patterns affect I/O throughput.
+This file is a summarized view of the results generated in the JSON file and for each test run, the file records detailed performance statistics, including:
+*   Minimum, maximum, mean, and median execution times in secs.
+*   Standard deviation and percentile values (p90, p95, p99) for timing.
+*   The maximum throughput achieved, measured in Megabytes per second (MB/s).
+
+
+#### Summary Table
+The script also puts out a nice summary table like below on shell, for quick summary of results.
+
++-------------+-------+---------+-------+---------+-----------+----------------+-----------------+-----------------+-----------------+------------------+----------------------+
+| Bucket Type | Group | Pattern | Files | Threads | Processes | File Size (MB) | Chunk Size (MB) | Block Size (MB) | Min Latency (s) | Mean Latency (s) | Max Throughput(MB/s) |
++-------------+-------+---------+-------+---------+-----------+----------------+-----------------+-----------------+-----------------+------------------+----------------------+
+|   regional  |  read |   seq   |   1   |    1    |     1     |     128.00     |      16.00      |      16.00      |      0.6391     |      0.7953      |  200.2678366246175   |
+|   regional  |  read |   rand  |   1   |    1    |     1     |     128.00     |      16.00      |      16.00      |      0.6537     |      0.7843      |  195.8066419960814   |
++-------------+-------+---------+-------+---------+-----------+----------------+-----------------+-----------------+-----------------+------------------+----------------------+
