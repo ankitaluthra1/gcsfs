@@ -1,12 +1,12 @@
 import logging
 import os
 import statistics
+import sys
 import uuid
 
 import pytest
 
 MB = 1024 * 1024
-GB = 1024 * MB
 
 
 @pytest.fixture
@@ -131,30 +131,31 @@ def pytest_benchmark_generate_json(config, benchmarks, machine_info, commit_info
             del bench.extra_info["stddev_time"]
 
 
-def with_file_sizes(sizes_in_bytes):
+def with_file_sizes(base_cases_func):
     """
     A decorator that generates benchmark cases for different file sizes.
 
-    It takes a list of base benchmark cases and creates variants for each
-    specified file size, updating the case name and file size parameter.
+    It reads file sizes from the BENCHMARK_FILE_SIZES_MB setting and creates
+    variants for each specified size, updating the case name and file size parameter.
     """
+    from gcsfs.tests.perf.microbenchmarks.settings import BENCHMARK_FILE_SIZES_MB
 
-    def decorator(base_cases_func):
-        def wrapper():
-            base_cases = base_cases_func()
-            new_cases = []
-            for case in base_cases:
-                for size_bytes in sizes_in_bytes:
-                    new_case = case.__class__(**case.__dict__)
-                    size_mb = size_bytes // MB
-                    new_case.file_size_bytes = size_bytes
-                    new_case.name = f"{case.name}_{size_mb}mb_file"
-                    new_cases.append(new_case)
-            return new_cases
+    if not BENCHMARK_FILE_SIZES_MB:
+        logging.error("No file sizes defined. Please set GCSFS_BENCHMARK_FILE_SIZES.")
+        sys.exit(1)
 
-        return wrapper
+    def wrapper():
+        base_cases = base_cases_func()
+        new_cases = []
+        for case in base_cases:
+            for size_mb in BENCHMARK_FILE_SIZES_MB:
+                new_case = case.__class__(**case.__dict__)
+                new_case.file_size_bytes = size_mb * MB
+                new_case.name = f"{case.name}_{size_mb}mb_file"
+                new_cases.append(new_case)
+        return new_cases
 
-    return decorator
+    return wrapper
 
 
 def with_bucket_types(bucket_configs):

@@ -35,6 +35,11 @@ def _setup_environment(args):
     if args.config:
         os.environ["GCSFS_BENCHMARK_FILTER"] = args.config
 
+    # Set file sizes from arguments if provided by the user
+    if args.file_sizes:
+        file_sizes_str = ",".join(map(str, args.file_sizes))
+        os.environ["GCSFS_BENCHMARK_FILE_SIZES"] = file_sizes_str
+
 
 def _run_benchmarks(results_dir, args):
     """
@@ -235,6 +240,12 @@ def main():
         "--log-level",
         default="DEBUG",
         help="Set pytest console logging level (e.g., DEBUG, INFO, WARNING). Only effective if --log is enabled.",
+    )
+    parser.add_argument(
+        "--file-sizes",
+        nargs="+",
+        type=int,
+        help="List of file sizes in MB to use for benchmarks (e.g., --file-sizes 128 1024). Defaults to 128MB.",
     )
     args = parser.parse_args()
 
