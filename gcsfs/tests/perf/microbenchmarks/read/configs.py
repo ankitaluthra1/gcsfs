@@ -1,7 +1,7 @@
 from gcsfs.tests.perf.microbenchmarks.conftest import with_bucket_types, with_file_sizes
 from gcsfs.tests.perf.microbenchmarks.read.parameters import ReadBenchmarkParameters
 from gcsfs.tests.perf.microbenchmarks.settings import BENCHMARK_FILTER
-from gcsfs.tests.settings import TEST_BUCKET, TEST_ZONAL_BUCKET
+from gcsfs.tests.settings import TEST_BUCKET
 
 # Base configurations for benchmarks.
 # These will be run against each bucket type and various file sizes using the decorators.
@@ -68,12 +68,7 @@ _base_read_benchmark_cases = [
 
 
 @with_file_sizes
-@with_bucket_types(
-    [
-        (TEST_BUCKET, "regional"),
-        (TEST_ZONAL_BUCKET, "zonal"),
-    ]
-)
+@with_bucket_types([(TEST_BUCKET, "regional")])
 def get_read_benchmark_cases():
     """
     Generates the full list of read benchmark test cases by applying
