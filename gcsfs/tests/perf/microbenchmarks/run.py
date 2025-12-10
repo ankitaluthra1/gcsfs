@@ -32,6 +32,7 @@ def _setup_environment(args):
     os.environ["GCSFS_HNS_TEST_BUCKET"] = args.hns_bucket if args.hns_bucket else ""
     os.environ["GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT"] = "true"
     os.environ["STORAGE_EMULATOR_HOST"] = "https://storage.googleapis.com"
+    os.environ["GCSFS_BENCHMARK_SKIP_TESTS"] = "false"
 
     if args.config:
         os.environ["GCSFS_BENCHMARK_FILTER"] = args.config
