@@ -1,6 +1,9 @@
 import contextlib
 import io
 import os
+import random
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from itertools import chain
 from unittest import mock
 
@@ -62,13 +65,11 @@ def zonal_mocks():
         patch_target_gcsfs_cat_file = "gcsfs.core.GCSFileSystem._cat_file"
 
         async def download_side_effect(read_requests, **kwargs):
-            if read_requests and len(read_requests) == 1:
-                param_offset, param_length, buffer_arg = read_requests[0]
+            for param_offset, param_length, buffer_arg in read_requests:
                 if hasattr(buffer_arg, "write"):
                     buffer_arg.write(
                         file_data[param_offset : param_offset + param_length]
                     )
-            return [mock.Mock(error=None)]
 
         mock_downloader = mock.Mock(spec=AsyncMultiRangeDownloader)
         mock_downloader.download_ranges = mock.AsyncMock(
@@ -306,6 +307,340 @@ def test_mrd_exception_handling(extended_gcsfs, zonal_mocks, exception_to_raise)
             extended_gcsfs.read_block(file_path, 0, 10)
 
         mocks["downloader"].download_ranges.assert_called_once()
+
+
+def _generate_large_test_data(size_bytes):
+    """Generates a byte string of the specified size with repeating pattern."""
+    pattern = b"0123456789abcdef"
+    return pattern * (size_bytes // len(pattern)) + pattern[: size_bytes % len(pattern)]
+
+
+_MULTI_THREADED_TEST_DATA_SIZE = 5 * 1024 * 1024  # 5MB
+_MULTI_THREADED_TEST_DATA = _generate_large_test_data(_MULTI_THREADED_TEST_DATA_SIZE)
+
+_MULTI_THREADED_TEST_FILE_PATH = f"{TEST_ZONAL_BUCKET}/multi_threaded_test_file"
+
+_TEST_BLOCK_SIZE_FOR_CHUNK_BOUNDARY = 1 * 1024 * 1024  # 1MB
+_NUM_CONCURRENCY_THREADS = 30
+_READ_LENGTH_CONCURRENCY = 1024  # 1KB
+_NUM_FAIL_SURVIVE_THREADS = 5
+
+
+def run_in_threads(func, args_list, num_threads):
+    """Runs a function in multiple threads and collects results or exceptions."""
+    results = []
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = [executor.submit(func, *args) for args in args_list]
+        for future in futures:
+            results.append(
+                future.result()
+            )  # This will re-raise exceptions from threads
+    return results
+
+
+def _read_range_from_fs(fs, path, offset, length, block_size=None):
+    """Helper function for Case when each thread opens its own file handle."""
+    with fs.open(path, "rb", block_size=block_size) as f:
+        f.seek(offset)
+        return f.read(length)
+
+
+def test_multithreaded_read_disjoint_ranges_zb(extended_gcsfs, zonal_mocks):
+    """
+    Tests concurrent reads of disjoint ranges from the same file.
+    Verifies that different parts of the file can be fetched simultaneously without data mix-up.
+    """
+    if not extended_gcsfs.on_google:
+        with mock.patch.object(
+            extended_gcsfs,
+            "_sync_lookup_bucket_type",
+            return_value=BucketType.UNKNOWN,
+        ):
+            with extended_gcsfs.open(_MULTI_THREADED_TEST_FILE_PATH, "wb") as f:
+                f.write(_MULTI_THREADED_TEST_DATA)
+
+    with zonal_mocks(_MULTI_THREADED_TEST_DATA) as mocks:
+        read_tasks = [
+            (extended_gcsfs, _MULTI_THREADED_TEST_FILE_PATH, 0, 1024),
+            (extended_gcsfs, _MULTI_THREADED_TEST_FILE_PATH, 2048, 1024),
+            (extended_gcsfs, _MULTI_THREADED_TEST_FILE_PATH, 4096, 1024),
+        ]
+
+        results = run_in_threads(
+            _read_range_from_fs, read_tasks, num_threads=len(read_tasks)
+        )
+
+        assert results[0] == _MULTI_THREADED_TEST_DATA[0:1024]
+        assert results[1] == _MULTI_THREADED_TEST_DATA[2048:3072]
+        assert results[2] == _MULTI_THREADED_TEST_DATA[4096:5120]
+
+        if mocks:
+            assert mocks["create_mrd"].call_count == len(read_tasks)
+            assert mocks["downloader"].download_ranges.call_count == len(read_tasks)
+            assert mocks["downloader"].close.call_count == len(read_tasks)
+
+
+def test_multithreaded_read_overlapping_ranges_zb(extended_gcsfs, zonal_mocks):
+    """
+    Tests concurrent reads of overlapping ranges from the same file.
+    """
+    if not extended_gcsfs.on_google:
+        with mock.patch.object(
+            extended_gcsfs,
+            "_sync_lookup_bucket_type",
+            return_value=BucketType.UNKNOWN,
+        ):
+            with extended_gcsfs.open(_MULTI_THREADED_TEST_FILE_PATH, "wb") as f:
+                f.write(_MULTI_THREADED_TEST_DATA)
+
+    with zonal_mocks(_MULTI_THREADED_TEST_DATA) as mocks:
+        read_tasks = [
+            (extended_gcsfs, _MULTI_THREADED_TEST_FILE_PATH, 0, 2048),
+            (
+                extended_gcsfs,
+                _MULTI_THREADED_TEST_FILE_PATH,
+                1024,
+                2048,
+            ),  # Overlaps with first
+            (
+                extended_gcsfs,
+                _MULTI_THREADED_TEST_FILE_PATH,
+                0,
+                2048,
+            ),  # Identical to first
+        ]
+
+        results = run_in_threads(
+            _read_range_from_fs, read_tasks, num_threads=len(read_tasks)
+        )
+
+        assert results[0] == _MULTI_THREADED_TEST_DATA[0:2048]
+        assert results[1] == _MULTI_THREADED_TEST_DATA[1024:3072]
+        assert results[2] == _MULTI_THREADED_TEST_DATA[0:2048]
+
+        if mocks:
+            assert mocks["create_mrd"].call_count == len(read_tasks)
+            assert mocks["downloader"].download_ranges.call_count == len(read_tasks)
+            assert mocks["downloader"].close.call_count == len(read_tasks)
+
+
+def test_multithreaded_read_chunk_boundary_zb(extended_gcsfs, zonal_mocks):
+    """
+    Tests concurrent reads that straddle internal buffering chunk boundaries.
+    Verifies correct stitching of data from multiple internal requests.
+    """
+    if not extended_gcsfs.on_google:
+        with mock.patch.object(
+            extended_gcsfs,
+            "_sync_lookup_bucket_type",
+            return_value=BucketType.UNKNOWN,
+        ):
+            with extended_gcsfs.open(_MULTI_THREADED_TEST_FILE_PATH, "wb") as f:
+                f.write(_MULTI_THREADED_TEST_DATA)
+
+    with zonal_mocks(_MULTI_THREADED_TEST_DATA) as mocks:
+        # Read ranges that straddle _TEST_BLOCK_SIZE boundaries
+        read_tasks = [
+            (
+                extended_gcsfs,
+                _MULTI_THREADED_TEST_FILE_PATH,
+                _TEST_BLOCK_SIZE_FOR_CHUNK_BOUNDARY - 512,
+                1024,
+                _TEST_BLOCK_SIZE_FOR_CHUNK_BOUNDARY,
+            ),  # Crosses 1MB boundary
+            (
+                extended_gcsfs,
+                _MULTI_THREADED_TEST_FILE_PATH,
+                _TEST_BLOCK_SIZE_FOR_CHUNK_BOUNDARY + 512,
+                1024,
+                _TEST_BLOCK_SIZE_FOR_CHUNK_BOUNDARY,
+            ),  # Starts after 1MB boundary
+            (
+                extended_gcsfs,
+                _MULTI_THREADED_TEST_FILE_PATH,
+                _TEST_BLOCK_SIZE_FOR_CHUNK_BOUNDARY * 2 - 256,
+                512,
+                _TEST_BLOCK_SIZE_FOR_CHUNK_BOUNDARY,
+            ),  # Crosses 2MB boundary
+        ]
+
+        results = run_in_threads(
+            _read_range_from_fs, read_tasks, num_threads=len(read_tasks)
+        )
+
+        assert (
+            results[0]
+            == _MULTI_THREADED_TEST_DATA[
+                _TEST_BLOCK_SIZE_FOR_CHUNK_BOUNDARY
+                - 512 : _TEST_BLOCK_SIZE_FOR_CHUNK_BOUNDARY
+                - 512
+                + 1024
+            ]
+        )
+        assert (
+            results[1]
+            == _MULTI_THREADED_TEST_DATA[
+                _TEST_BLOCK_SIZE_FOR_CHUNK_BOUNDARY
+                + 512 : _TEST_BLOCK_SIZE_FOR_CHUNK_BOUNDARY
+                + 512
+                + 1024
+            ]
+        )
+        assert (
+            results[2]
+            == _MULTI_THREADED_TEST_DATA[
+                _TEST_BLOCK_SIZE_FOR_CHUNK_BOUNDARY * 2
+                - 256 : _TEST_BLOCK_SIZE_FOR_CHUNK_BOUNDARY * 2
+                - 256
+                + 512
+            ]
+        )
+
+        if mocks:
+            assert mocks["create_mrd"].call_count == len(read_tasks)
+            assert mocks["downloader"].download_ranges.call_count == len(read_tasks)
+            assert mocks["downloader"].close.call_count == len(read_tasks)
+
+
+def _read_random_range(fs, path, file_size, read_length):
+    """Helper function to read a random range from a file."""
+    offset = random.randint(0, file_size - read_length)
+    with fs.open(path, "rb") as f:
+        f.seek(offset)
+        return f.read(read_length)
+
+
+def test_multithreaded_read_high_concurrency_zb(extended_gcsfs, zonal_mocks):
+    """
+    Tests high-concurrency reads to stress the connection pooling and handling.
+    Verifies that many concurrent requests do not lead to crashes or deadlocks.
+    """
+    if not extended_gcsfs.on_google:
+        with mock.patch.object(
+            extended_gcsfs,
+            "_sync_lookup_bucket_type",
+            return_value=BucketType.UNKNOWN,
+        ):
+            with extended_gcsfs.open(_MULTI_THREADED_TEST_FILE_PATH, "wb") as f:
+                f.write(_MULTI_THREADED_TEST_DATA)
+
+    with zonal_mocks(_MULTI_THREADED_TEST_DATA) as mocks:
+        read_tasks = [
+            (
+                extended_gcsfs,
+                _MULTI_THREADED_TEST_FILE_PATH,
+                _MULTI_THREADED_TEST_DATA_SIZE,
+                _READ_LENGTH_CONCURRENCY,
+            )
+            for _ in range(_NUM_CONCURRENCY_THREADS)
+        ]
+
+        results = run_in_threads(
+            _read_random_range, read_tasks, num_threads=_NUM_CONCURRENCY_THREADS
+        )
+
+        assert len(results) == _NUM_CONCURRENCY_THREADS
+        for res in results:
+            assert len(res) == _READ_LENGTH_CONCURRENCY
+            assert res in _MULTI_THREADED_TEST_DATA  # Ensure the content is valid
+
+        if mocks:
+            assert mocks["create_mrd"].call_count == _NUM_CONCURRENCY_THREADS
+            assert (
+                mocks["downloader"].download_ranges.call_count
+                == _NUM_CONCURRENCY_THREADS
+            )
+            assert mocks["downloader"].close.call_count == _NUM_CONCURRENCY_THREADS
+
+
+def test_multithreaded_read_one_fails_others_survive_zb(extended_gcsfs, zonal_mocks):
+    """
+    Tests fault tolerance: one thread's read operation fails, but others complete successfully.
+    """
+    if extended_gcsfs.on_google:
+        pytest.skip("Cannot mock failures on real GCS")
+
+    with mock.patch.object(
+        extended_gcsfs,
+        "_sync_lookup_bucket_type",
+        return_value=BucketType.UNKNOWN,
+    ):
+        with extended_gcsfs.open(_MULTI_THREADED_TEST_FILE_PATH, "wb") as f:
+            f.write(_MULTI_THREADED_TEST_DATA)
+
+    with zonal_mocks(_MULTI_THREADED_TEST_DATA) as mocks:
+        original_download_ranges_side_effect = mocks[
+            "downloader"
+        ].download_ranges.side_effect
+
+        call_counter = 0
+        counter_lock = threading.Lock()
+
+        async def failing_download_ranges_side_effect(read_requests):
+            nonlocal call_counter
+            with counter_lock:
+                current_call_idx = call_counter
+                call_counter += 1
+            if current_call_idx == 2:  # Make the 3rd call (index 2) fail
+                raise DataCorruption(None, "Simulated data corruption for thread 3")
+
+            await original_download_ranges_side_effect(read_requests)
+
+        mocks["downloader"].download_ranges.side_effect = (
+            failing_download_ranges_side_effect
+        )
+
+        read_tasks_args = [
+            (extended_gcsfs, _MULTI_THREADED_TEST_FILE_PATH, i * 1024, 1024)
+            for i in range(_NUM_FAIL_SURVIVE_THREADS)
+        ]
+
+        thread_results = [None] * _NUM_FAIL_SURVIVE_THREADS
+        thread_exceptions = [None] * _NUM_FAIL_SURVIVE_THREADS
+
+        def _run_task_and_store_result(task_idx, fs, path, offset, length):
+            try:
+                thread_results[task_idx] = _read_range_from_fs(fs, path, offset, length)
+            except Exception as e:
+                thread_exceptions[task_idx] = e
+
+        with ThreadPoolExecutor(max_workers=_NUM_FAIL_SURVIVE_THREADS) as executor:
+            futures = [
+                executor.submit(_run_task_and_store_result, i, *read_tasks_args[i])
+                for i in range(_NUM_FAIL_SURVIVE_THREADS)
+            ]
+            for future in futures:
+                future.result()  # Wait for all threads to complete or for exceptions to be raised
+
+        failed_count = sum(1 for exc in thread_exceptions if exc is not None)
+        succeeded_count = sum(1 for exc in thread_exceptions if exc is None)
+
+        assert failed_count == 1, f"Expected 1 failure, got {failed_count}"
+        assert succeeded_count == _NUM_FAIL_SURVIVE_THREADS - 1
+
+        failed_thread_idx = next(
+            i for i, exc in enumerate(thread_exceptions) if exc is not None
+        )
+
+        for i in range(_NUM_FAIL_SURVIVE_THREADS):
+            if i == failed_thread_idx:
+                assert isinstance(thread_exceptions[i], DataCorruption)
+                assert "Simulated data corruption" in str(thread_exceptions[i])
+                assert thread_results[i] is None
+            else:  # Other threads should have succeeded
+                assert thread_exceptions[i] is None
+                assert (
+                    thread_results[i]
+                    == _MULTI_THREADED_TEST_DATA[i * 1024 : i * 1024 + 1024]
+                )
+
+        if mocks:
+            assert mocks["create_mrd"].call_count == _NUM_FAIL_SURVIVE_THREADS
+            assert (
+                mocks["downloader"].download_ranges.call_count
+                == _NUM_FAIL_SURVIVE_THREADS
+            )
+            assert mocks["downloader"].close.call_count == _NUM_FAIL_SURVIVE_THREADS
 
 
 def test_mrd_stream_cleanup(extended_gcsfs, zonal_mocks):
