@@ -1,9 +1,4 @@
-from gcsfs.tests.perf.microbenchmarks.conftest import (
-    GB,
-    MB,
-    with_bucket_types,
-    with_file_sizes,
-)
+from gcsfs.tests.perf.microbenchmarks.conftest import with_bucket_types, with_file_sizes
 from gcsfs.tests.perf.microbenchmarks.read.parameters import ReadBenchmarkParameters
 from gcsfs.tests.perf.microbenchmarks.settings import BENCHMARK_FILTER
 from gcsfs.tests.settings import TEST_BUCKET, TEST_ZONAL_BUCKET
@@ -72,7 +67,7 @@ _base_read_benchmark_cases = [
 ]
 
 
-@with_file_sizes([128 * MB, 1 * GB])
+@with_file_sizes
 @with_bucket_types(
     [
         (TEST_BUCKET, "regional"),
