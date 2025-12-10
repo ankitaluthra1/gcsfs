@@ -119,6 +119,7 @@ steps:
           pytest -vv -s \
           --log-format='%(asctime)s %(levelname)s %(message)s' \
           --log-date-format='%H:%M:%S' \
+          --color=no \
           gcsfs/ \
           --deselect gcsfs/tests/test_core.py::test_sign
 
@@ -128,6 +129,7 @@ steps:
          # pytest -vv -s \
          # --log-format='%(asctime)s %(levelname)s %(message)s' \
          # --log-date-format='%H:%M:%S' \
+         # --color=no \
          # gcsfs/tests/test_extended_gcsfs.py
         "
 
