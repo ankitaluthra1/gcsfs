@@ -32,6 +32,10 @@ The read benchmarks are defined by the `ReadBenchmarkParameters` class in `read/
 *   `block_size_bytes`: The block size for gcsfs file buffering. Defaults to `16MB`.
 *   `chunk_size_bytes`: The size of each read operation. Defaults to `16MB`.
 *   `file_size_bytes`: The total size of each file.
+*   `rounds`: The total number of pytest-benchmark rounds for each parameterized test.
+
+To ensure that the results are stable and not skewed by outliers, each benchmark is run for a set number of rounds.
+By default, this is set to 10 rounds, but it can be configured via `rounds` parameter if needed. This helps in providing a more accurate and reliable performance profile.
 
 ### Configurations
 
