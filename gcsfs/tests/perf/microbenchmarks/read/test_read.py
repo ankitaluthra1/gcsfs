@@ -11,6 +11,14 @@ from gcsfs.tests.perf.microbenchmarks.conftest import (
     publish_multi_process_benchmark_extra_info,
 )
 from gcsfs.tests.perf.microbenchmarks.read.configs import get_read_benchmark_cases
+from gcsfs.tests.settings import BENCHMARK_SKIP_TESTS
+
+pytestmark = pytest.mark.skipif(
+    BENCHMARK_SKIP_TESTS,
+    reason="""Skipping benchmark tests.
+Set GCSFS_BENCHMARK_SKIP_TESTS=false to run them,
+or use the orchestrator script at gcsfs/tests/perf/microbenchmarks/run.py""",
+)
 
 BENCHMARK_GROUP = "read"
 

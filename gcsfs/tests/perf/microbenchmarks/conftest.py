@@ -7,16 +7,15 @@ from typing import Any, Callable, List, Tuple
 
 import pytest
 
-from gcsfs.tests.settings import BENCHMARK_SKIP_TESTS
-
 MB = 1024 * 1024
 
-pytestmark = pytest.mark.skipif(
-    BENCHMARK_SKIP_TESTS,
-    reason="""Skipping benchmark tests.
-Set GCSFS_BENCHMARK_SKIP_TESTS=false to run them,
-or use the orchestrator script at gcsfs/tests/perf/microbenchmarks/run.py""",
-)
+try:
+    # This import is used to check if the pytest-benchmark plugin is installed.
+    import pytest_benchmark  # noqa: F401
+
+    benchmark_plugin_installed = True
+except ImportError:
+    benchmark_plugin_installed = False
 
 
 @pytest.fixture
@@ -63,27 +62,29 @@ def gcsfs_benchmark_read_write(extended_gcs_factory, request):
         logging.error(f"Failed to clean up benchmark files: {e}")
 
 
-def pytest_benchmark_generate_json(config, benchmarks, machine_info, commit_info):
-    """
-    Hook to post-process benchmark results before generating the JSON report.
-    """
-    for bench in benchmarks:
-        if "timings" in bench.get("extra_info", {}):
-            bench.stats.data = bench.extra_info["timings"]
-            bench.stats.min = bench.extra_info["min_time"]
-            bench.stats.max = bench.extra_info["max_time"]
-            bench.stats.mean = bench.extra_info["mean_time"]
-            bench.stats.median = bench.extra_info["median_time"]
-            bench.stats.stddev = bench.extra_info["stddev_time"]
-            bench.stats.rounds = bench.extra_info["rounds"]
+if benchmark_plugin_installed:
 
-            del bench.extra_info["timings"]
-            del bench.extra_info["min_time"]
-            del bench.extra_info["max_time"]
-            del bench.extra_info["mean_time"]
-            del bench.extra_info["median_time"]
-            del bench.extra_info["stddev_time"]
-            del bench.extra_info["rounds"]
+    def pytest_benchmark_generate_json(config, benchmarks, machine_info, commit_info):
+        """
+        Hook to post-process benchmark results before generating the JSON report.
+        """
+        for bench in benchmarks:
+            if "timings" in bench.get("extra_info", {}):
+                bench.stats.data = bench.extra_info["timings"]
+                bench.stats.min = bench.extra_info["min_time"]
+                bench.stats.max = bench.extra_info["max_time"]
+                bench.stats.mean = bench.extra_info["mean_time"]
+                bench.stats.median = bench.extra_info["median_time"]
+                bench.stats.stddev = bench.extra_info["stddev_time"]
+                bench.stats.rounds = bench.extra_info["rounds"]
+
+                del bench.extra_info["timings"]
+                del bench.extra_info["min_time"]
+                del bench.extra_info["max_time"]
+                del bench.extra_info["mean_time"]
+                del bench.extra_info["median_time"]
+                del bench.extra_info["stddev_time"]
+                del bench.extra_info["rounds"]
 
 
 def publish_benchmark_extra_info(
