@@ -576,13 +576,11 @@ def test_multithreaded_read_one_fails_others_survive_zb(extended_gcsfs, zonal_mo
                     == _MULTI_THREADED_TEST_DATA[i * 1024 : i * 1024 + 1024]
                 )
 
-        if mocks:
-            assert mocks["create_mrd"].call_count == _NUM_FAIL_SURVIVE_THREADS
-            assert (
-                mocks["downloader"].download_ranges.call_count
-                == _NUM_FAIL_SURVIVE_THREADS
-            )
-            assert mocks["downloader"].close.call_count == _NUM_FAIL_SURVIVE_THREADS
+        assert mocks["create_mrd"].call_count == _NUM_FAIL_SURVIVE_THREADS
+        assert (
+            mocks["downloader"].download_ranges.call_count == _NUM_FAIL_SURVIVE_THREADS
+        )
+        assert mocks["downloader"].close.call_count == _NUM_FAIL_SURVIVE_THREADS
 
 
 def test_mrd_stream_cleanup(extended_gcsfs, zonal_mocks):
@@ -602,3 +600,27 @@ def test_mrd_stream_cleanup(extended_gcsfs, zonal_mocks):
 
         assert True is f.closed
         assert False is f.mrd.is_stream_open
+
+
+def test_mrd_created_once_for_zonal_file(extended_gcsfs, gcs_bucket_mocks):
+    """
+    Tests that the AsyncMultiRangeDownloader (MRD) is created only once when a
+    ZonalFile is opened, and not for each subsequent read operation.
+    """
+    if extended_gcsfs.on_google:
+        pytest.skip("Internal call counts cannot be verified against real GCS.")
+
+    with gcs_bucket_mocks(
+        json_data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
+    ) as mocks:
+        with extended_gcsfs.open(file_path, "rb") as f:
+            # The MRD should be created upon opening the file.
+            mocks["create_mrd"].assert_called_once()
+
+            f.read(10)
+            f.read(20)
+            f.seek(5)
+            f.read(5)
+
+        # Verify that create_mrd was not called again.
+        mocks["create_mrd"].assert_called_once()
