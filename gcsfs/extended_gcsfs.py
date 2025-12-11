@@ -57,9 +57,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         # often used for testing with emulators. However, the gRPC and storage
         # control clients require a credentials object for initialization.
         # We explicitly use AnonymousCredentials() to allow unauthenticated access.
-        if (
-            self.credentials.token == "anon" or self._endpoint == "http://0.0.0.0:4443"
-        ):  # docker gcs endpoint
+        if self.credentials.token == "anon":
             self.credential = AnonymousCredentials()
         # initializing grpc and storage control client for Hierarchical and
         # zonal bucket operations
