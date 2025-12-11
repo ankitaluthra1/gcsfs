@@ -1,4 +1,5 @@
 import logging
+import os
 from enum import Enum
 
 from fsspec import asyn
@@ -7,6 +8,9 @@ from google.api_core import gapic_v1
 from google.api_core.client_info import ClientInfo
 from google.auth.credentials import AnonymousCredentials
 from google.cloud import storage_control_v2
+from google.cloud.storage._experimental.asyncio.async_appendable_object_writer import (
+    AsyncAppendableObjectWriter,
+)
 from google.cloud.storage._experimental.asyncio.async_grpc_client import AsyncGrpcClient
 from google.cloud.storage._experimental.asyncio.async_multi_range_downloader import (
     AsyncMultiRangeDownloader,
@@ -256,11 +260,139 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             if mrd_created:
                 await mrd.close()
 
+    async def _put_file(
+        self,
+        lpath,
+        rpath,
+        metadata=None,
+        consistency=None,
+        content_type=None,
+        chunksize=50 * 2**20,
+        callback=None,
+        fixed_key_metadata=None,
+        mode="overwrite",
+        **kwargs,
+    ):
+        bucket, key, generation = self.split_path(rpath)
+        if not await self._is_zonal_bucket(bucket):
+            return await super()._put_file(
+                lpath,
+                rpath,
+                metadata=metadata,
+                consistency=consistency,
+                content_type=content_type,
+                chunksize=chunksize,
+                callback=callback,
+                fixed_key_metadata=fixed_key_metadata,
+                mode=mode,
+                **kwargs,
+            )
+
+        if os.path.isdir(lpath):
+            return
+
+        if generation:
+            raise ValueError("Cannot write to specific object generation")
+
+        if (
+            metadata
+            or fixed_key_metadata
+            or consistency
+            or chunksize != 50 * 2**20
+            or (content_type and content_type != "application/octet-stream")
+        ):
+            logger.warning(
+                "Zonal buckets do not support content_type, metadata, "
+                "fixed_key_metadata, consistency or chunksize during upload. "
+                "These parameters will be ignored."
+            )
+
+        writer = await zb_hns_utils.init_aaow(self.grpc_client, bucket, key)
+
+        try:
+            await writer.append_from_file(lpath)
+        except Exception:
+            raise
+        finally:
+            await writer.close(finalize_on_close=True)
+
+        self.invalidate_cache(self._parent(rpath))
+
+    async def _pipe_file(
+        self,
+        path,
+        data,
+        metadata=None,
+        consistency=None,
+        content_type="application/octet-stream",
+        fixed_key_metadata=None,
+        chunksize=50 * 2**20,
+        mode="overwrite",
+    ):
+        bucket, key, generation = self.split_path(path)
+        if not await self._is_zonal_bucket(bucket):
+            return await super()._pipe_file(
+                path,
+                data,
+                metadata=metadata,
+                consistency=consistency,
+                content_type=content_type,
+                fixed_key_metadata=fixed_key_metadata,
+                chunksize=chunksize,
+                mode=mode,
+            )
+
+        if (
+            metadata
+            or fixed_key_metadata
+            or chunksize != 50 * 2**20
+            or (content_type and content_type != "application/octet-stream")
+        ):
+            logger.warning(
+                "Zonal buckets do not support content_type, metadata, "
+                "fixed_key_metadata or chunksize during upload. These "
+                "parameters will be ignored."
+            )
+        writer = await zb_hns_utils.init_aaow(self.grpc_client, bucket, key)
+        try:
+            await writer.append(data)
+        except Exception:
+            raise
+        finally:
+            await writer.close(finalize_on_close=True)
+
+        self.invalidate_cache(self._parent(path))
+
 
 async def upload_chunk(fs, location, data, offset, size, content_type):
-    raise NotImplementedError(
-        "upload_chunk is not implemented yet for Zonal experimental feature. Please use write() instead."
-    )
+    """
+    Uploads a chunk of data using AsyncAppendableObjectWriter.
+    """
+    if offset or size or content_type:
+        logger.warning(
+            "Zonal buckets do not support offset, or content_type during upload. These parameters will be ignored."
+        )
+
+    if not isinstance(location, AsyncAppendableObjectWriter):
+        raise TypeError(
+            "upload_chunk for Zonal buckets expects an AsyncAppendableObjectWriter instance."
+        )
+    if not location._is_stream_open:
+        raise ValueError("Writer is closed. Please initiate a new upload.")
+
+    try:
+        await location.append(data)
+    except Exception as e:
+        logger.error(
+            f"Error uploading chunk at offset {location.offset}: {e}. Closing stream."
+        )
+        # Don't finalize the upload on error
+        await location.close(finalize_on_close=False)
+        raise
+    finally:
+        if location.offset >= size:
+            logger.debug("Uploaded data is equal or greater than size.Closing stream.")
+            await location.close(finalize_on_close=True)
 
 
 async def initiate_upload(
@@ -273,9 +405,23 @@ async def initiate_upload(
     mode="overwrite",
     kms_key_name=None,
 ):
-    raise NotImplementedError(
-        "initiate_upload is not implemented yet for Zonal experimental feature. Please use write() instead."
-    )
+    """
+    Initiates an upload for Zonal buckets by creating an AsyncAppendableObjectWriter.
+    """
+    if (
+        metadata
+        or fixed_key_metadata
+        or kms_key_name
+        or (content_type and content_type != "application/octet-stream")
+    ):
+        logger.warning(
+            "Zonal buckets do not support content_type, metadata, fixed_key_metadata, "
+            "or kms_key_name during upload. These parameters will be ignored."
+        )
+
+    # If generation is not passed to init_aaow, it creates a new object and overwrites if object already exists.
+    # Hence it works for both 'overwrite' and 'create' modes.
+    return await zb_hns_utils.init_aaow(fs.grpc_client, bucket, key)
 
 
 async def simple_upload(
@@ -290,6 +436,26 @@ async def simple_upload(
     mode="overwrite",
     kms_key_name=None,
 ):
-    raise NotImplementedError(
-        "simple_upload is not implemented yet for Zonal experimental feature. Please use write() instead."
-    )
+    """
+    Performs a simple, single-request upload for Zonal buckets using gRPC.
+    """
+    if (
+        metadatain
+        or fixed_key_metadata
+        or kms_key_name
+        or consistency
+        or (content_type and content_type != "application/octet-stream")
+    ):
+        logger.warning(
+            "Zonal buckets do not support content_type, metadatain, fixed_key_metadata, "
+            "consistency or kms_key_name during upload. These parameters will be ignored."
+        )
+
+    writer = await zb_hns_utils.init_aaow(fs.grpc_client, bucket, key)
+
+    try:
+        await writer.append(datain)
+    except Exception:
+        raise
+    finally:
+        await writer.close(finalize_on_close=True)

@@ -1,15 +1,24 @@
+import contextlib
 import logging
 import os
 import shlex
 import subprocess
 import time
+from unittest import mock
 
 import fsspec
 import pytest
 import requests
 from google.cloud import storage
+from google.cloud.storage._experimental.asyncio.async_appendable_object_writer import (
+    AsyncAppendableObjectWriter,
+)
+from google.cloud.storage._experimental.asyncio.async_multi_range_downloader import (
+    AsyncMultiRangeDownloader,
+)
 
 from gcsfs import GCSFileSystem
+from gcsfs.extended_gcsfs import BucketType
 from gcsfs.tests.settings import TEST_BUCKET, TEST_VERSIONED_BUCKET, TEST_ZONAL_BUCKET
 
 files = {
@@ -295,3 +304,107 @@ def _create_extended_gcsfs(gcs_factory, buckets_to_delete, populate=True, **kwar
             )
     extended_gcsfs.invalidate_cache()
     return extended_gcsfs
+
+
+@pytest.fixture
+def zonal_write_mocks():
+    """A fixture for mocking Zonal bucket write functionality."""
+    is_real_gcs = (
+        os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
+    )
+    if is_real_gcs:
+        yield None
+        return
+
+    patch_target_get_bucket_type = (
+        "gcsfs.extended_gcsfs.ExtendedGcsFileSystem._get_bucket_type"
+    )
+    patch_target_init_aaow = "gcsfs.zb_hns_utils.init_aaow"
+
+    mock_aaow = mock.AsyncMock(spec=AsyncAppendableObjectWriter)
+    mock_aaow.offset = 0
+    mock_aaow._is_stream_open = True
+    mock_init_aaow = mock.AsyncMock(return_value=mock_aaow)
+
+    async def append_side_effect(data):
+        mock_aaow.offset += len(data)
+
+    mock_aaow.append.side_effect = append_side_effect
+
+    async def close_side_effect(finalize_on_close=False, *args, **kwargs):
+        mock_aaow._is_stream_open = False
+
+    mock_aaow.close.side_effect = close_side_effect
+
+    with (
+        mock.patch(
+            patch_target_get_bucket_type,
+            return_value=BucketType.ZONAL_HIERARCHICAL,
+        ),
+        mock.patch(patch_target_init_aaow, mock_init_aaow),
+    ):
+        mocks = {
+            "aaow": mock_aaow,
+            "init_aaow": mock_init_aaow,
+        }
+        yield mocks
+
+
+@pytest.fixture
+def gcs_bucket_mocks():
+    """A factory fixture for mocking bucket functionality for different bucket types."""
+
+    @contextlib.contextmanager
+    def _gcs_bucket_mocks_factory(file_data, bucket_type_val):
+        """Creates mocks for a given file content and bucket type."""
+        is_real_gcs = (
+            os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
+        )
+        if is_real_gcs:
+            yield None
+            return
+        patch_target_get_bucket_type = (
+            "gcsfs.extended_gcsfs.ExtendedGcsFileSystem._get_bucket_type"
+        )
+        patch_target_create_mrd = (
+            "google.cloud.storage._experimental.asyncio.async_multi_range_downloader"
+            ".AsyncMultiRangeDownloader.create_mrd"
+        )
+        patch_target_gcsfs_cat_file = "gcsfs.core.GCSFileSystem._cat_file"
+
+        async def download_side_effect(read_requests, **kwargs):
+            if read_requests and len(read_requests) == 1:
+                param_offset, param_length, buffer_arg = read_requests[0]
+                if hasattr(buffer_arg, "write"):
+                    buffer_arg.write(
+                        file_data[param_offset : param_offset + param_length]
+                    )
+            return [mock.Mock(error=None)]
+
+        mock_downloader = mock.Mock(spec=AsyncMultiRangeDownloader)
+        mock_downloader.download_ranges = mock.AsyncMock(
+            side_effect=download_side_effect
+        )
+
+        mock_create_mrd = mock.AsyncMock(return_value=mock_downloader)
+        with (
+            mock.patch(
+                patch_target_get_bucket_type,
+                return_value=BucketType.ZONAL_HIERARCHICAL,
+            ) as mock_get_bucket_type,
+            mock.patch(patch_target_create_mrd, mock_create_mrd),
+            mock.patch(
+                patch_target_gcsfs_cat_file, new_callable=mock.AsyncMock
+            ) as mock_cat_file,
+        ):
+            mocks = {
+                "get_bucket_type": mock_get_bucket_type,
+                "create_mrd": mock_create_mrd,
+                "downloader": mock_downloader,
+                "cat_file": mock_cat_file,
+            }
+            yield mocks
+            # Common assertion for all tests using this mock
+            mock_cat_file.assert_not_called()
+
+    return _gcs_bucket_mocks_factory

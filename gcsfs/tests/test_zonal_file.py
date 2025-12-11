@@ -5,8 +5,8 @@ from unittest import mock
 
 import pytest
 
-from gcsfs.extended_gcsfs import BucketType
 from gcsfs.tests.settings import TEST_ZONAL_BUCKET
+from gcsfs.tests.utils import tempdir, tmpfile
 
 file_path = f"{TEST_ZONAL_BUCKET}/zonal-file-test"
 test_data = b"hello world"
@@ -21,31 +21,6 @@ should_run = os.getenv(REQUIRED_ENV_VAR, "false").lower() in (
 pytestmark = pytest.mark.skipif(
     not should_run, reason=f"Skipping tests: {REQUIRED_ENV_VAR} env variable is not set"
 )
-
-
-@pytest.fixture
-def zonal_write_mocks():
-    """A fixture for mocking Zonal bucket write functionality."""
-
-    patch_target_get_bucket_type = (
-        "gcsfs.extended_gcsfs.ExtendedGcsFileSystem._get_bucket_type"
-    )
-    patch_target_init_aaow = "gcsfs.zb_hns_utils.init_aaow"
-
-    mock_aaow = mock.AsyncMock()
-    mock_init_aaow = mock.AsyncMock(return_value=mock_aaow)
-    with (
-        mock.patch(
-            patch_target_get_bucket_type,
-            return_value=BucketType.ZONAL_HIERARCHICAL,
-        ),
-        mock.patch(patch_target_init_aaow, mock_init_aaow),
-    ):
-        mocks = {
-            "aaow": mock_aaow,
-            "init_aaow": mock_init_aaow,
-        }
-        yield mocks
 
 
 @pytest.mark.parametrize(
@@ -134,20 +109,10 @@ def test_zonal_file_close_with_autocommit_false(extended_gcsfs, zonal_write_mock
     zonal_write_mocks["aaow"].close.assert_awaited_once_with(finalize_on_close=False)
 
 
-@pytest.mark.parametrize(
-    "method_name",
-    [
-        ("_initiate_upload"),
-        ("_simple_upload"),
-        ("_upload_chunk"),
-    ],
-)
-def test_zonal_file_not_implemented_methods(
-    extended_gcsfs, zonal_write_mocks, method_name  # noqa: F841
-):
+def test_zonal_file_not_implemented_method(extended_gcsfs, zonal_write_mocks):
     """Test that some GCSFile methods are not implemented for ZonalFile."""
     with extended_gcsfs.open(file_path, "wb") as f:
-        method_to_call = getattr(f, method_name)
+        method_to_call = getattr(f, "_upload_chunk")
         with pytest.raises(NotImplementedError):
             method_to_call()
 
@@ -185,3 +150,96 @@ class TestZonalFileRealGCS:
             f.write(data1)
             f.write(data2)
         assert extended_gcsfs.cat(file_path) == data1 + data2
+
+    @pytest.mark.skip(
+        reason="Skipping put tests until append_from_file is implemented."
+    )
+    def test_put_file_to_zonal_bucket(self, extended_gcsfs):
+        """Test putting a large file to a Zonal bucket."""
+        remote_path = f"{TEST_ZONAL_BUCKET}/put_large_file"
+        data = os.urandom(1 * 1024 * 1024)  # 1MB random data
+
+        with tmpfile() as local_f:
+            with open(local_f, "wb") as f:
+                f.write(data)
+            extended_gcsfs.put(local_f, remote_path)
+
+        assert extended_gcsfs.exists(remote_path)
+        assert extended_gcsfs.cat(remote_path) == data
+
+    @pytest.mark.skip(
+        reason="Skipping put tests until append_from_file is implemented."
+    )
+    def test_put_overwrite_in_zonal_bucket(self, extended_gcsfs):
+        """Test that put overwrites an existing file in a Zonal bucket."""
+        remote_path = f"{TEST_ZONAL_BUCKET}/put_overwrite"
+        initial_data = b"initial data for put overwrite"
+        overwrite_data = b"overwritten data for put"
+
+        with tmpfile() as local_f:
+            with open(local_f, "wb") as f:
+                f.write(initial_data)
+            extended_gcsfs.put(local_f, remote_path)
+
+        assert extended_gcsfs.cat(remote_path) == initial_data
+
+        with tmpfile() as local_f_overwrite:
+            with open(local_f_overwrite, "wb") as f:
+                f.write(overwrite_data)
+            extended_gcsfs.put(local_f_overwrite, remote_path)
+
+        assert extended_gcsfs.cat(remote_path) == overwrite_data
+
+    @pytest.mark.skip(
+        reason="Skipping put tests until append_from_file is implemented."
+    )
+    def test_put_directory_to_zonal_bucket(self, extended_gcsfs):
+        """Test putting a directory recursively to a Zonal bucket."""
+        remote_dir = f"{TEST_ZONAL_BUCKET}/zonal_put_dir"
+        data1 = b"file one content"
+        data2 = b"file two content"
+
+        with tempdir() as local_dir:
+            # Create a local directory structure
+            os.makedirs(os.path.join(local_dir, "subdir"))
+            with open(os.path.join(local_dir, "subdir", "file1.txt"), "wb") as f:
+                f.write(data1)
+            with open(os.path.join(local_dir, "subdir", "file2.txt"), "wb") as f:
+                f.write(data2)
+
+            # Upload the directory
+            extended_gcsfs.put(
+                os.path.join(local_dir, "subdir"), remote_dir, recursive=True
+            )
+
+        # Verify the upload
+        assert extended_gcsfs.isdir(remote_dir)
+        remote_files = extended_gcsfs.ls(remote_dir)
+        assert len(remote_files) == 2
+        assert f"{remote_dir}/file1.txt" in remote_files
+        assert f"{remote_dir}/file2.txt" in remote_files
+
+        assert extended_gcsfs.cat(f"{remote_dir}/file1.txt") == data1
+        assert extended_gcsfs.cat(f"{remote_dir}/file2.txt") == data2
+
+    def test_pipe_data_to_zonal_bucket(self, extended_gcsfs):
+        """Test piping a small amount of data to a Zonal bucket."""
+        remote_path = f"{TEST_ZONAL_BUCKET}/pipe_small"
+        data = b"some small piped data"
+
+        extended_gcsfs.pipe(remote_path, data)
+
+        assert extended_gcsfs.exists(remote_path)
+        assert extended_gcsfs.cat(remote_path) == data
+
+    def test_pipe_overwrite_in_zonal_bucket(self, extended_gcsfs):
+        """Test that pipe overwrites an existing file in a Zonal bucket."""
+        remote_path = f"{TEST_ZONAL_BUCKET}/pipe_overwrite"
+        initial_data = b"initial data for pipe overwrite"
+        overwrite_data = b"overwritten piped data for pipe"
+
+        extended_gcsfs.pipe(remote_path, initial_data)
+        assert extended_gcsfs.cat(remote_path) == initial_data
+
+        extended_gcsfs.pipe(remote_path, overwrite_data)
+        assert extended_gcsfs.cat(remote_path) == overwrite_data

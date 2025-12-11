@@ -111,48 +111,18 @@ class ZonalFile(GCSFile):
         )
 
     def _initiate_upload(self):
-        """Initiates the upload for Zonal buckets using gRPC."""
-        from gcsfs.extended_gcsfs import initiate_upload
-
-        self.location = asyn.sync(
-            self.gcsfs.loop,
-            initiate_upload,
-            self.gcsfs,
-            self.bucket,
-            self.key,
-            self.content_type,
-            self.metadata,
-            self.fixed_key_metadata,
-            mode="create" if "x" in self.mode else "overwrite",
-            kms_key_name=self.kms_key_name,
-            timeout=self.timeout,
+        logger.debug(
+            "_initiate_upload is not applicable for ZonalFile. Please use write() instead."
         )
 
     def _simple_upload(self):
-        """Performs a simple upload for Zonal buckets using gRPC."""
-        from gcsfs.extended_gcsfs import simple_upload
-
-        self.buffer.seek(0)
-        data = self.buffer.read()
-        asyn.sync(
-            self.gcsfs.loop,
-            simple_upload,
-            self.gcsfs,
-            self.bucket,
-            self.key,
-            data,
-            self.metadata,
-            self.consistency,
-            self.content_type,
-            self.fixed_key_metadata,
-            mode="create" if "x" in self.mode else "overwrite",
-            kms_key_name=self.kms_key_name,
-            timeout=self.timeout,
+        logger.debug(
+            "_simple_upload is not applicable for ZonalFile. Please use write() instead."
         )
 
     def _upload_chunk(self, final=False):
-        raise NotImplementedError(
-            "_upload_chunk is not implemented yet for ZonalFile. Please use write() instead."
+        logger.debug(
+            "_upload_chunk is not applicable for ZonalFile. Please use write() instead."
         )
 
     def close(self):
