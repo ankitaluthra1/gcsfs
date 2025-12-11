@@ -51,10 +51,10 @@ def test_dircache_filled(gcs):
 def test_many_connect(docker_gcs):
     from multiprocessing.pool import ThreadPool
 
-    GCSFileSystem(token="anon", endpoint_url=docker_gcs)
+    GCSFileSystem(endpoint_url=docker_gcs)
 
     def task(i):
-        GCSFileSystem(token="anon", endpoint_url=docker_gcs).ls("")
+        GCSFileSystem(endpoint_url=docker_gcs).ls("")
         return True
 
     pool = ThreadPool(processes=20)
@@ -69,7 +69,7 @@ def test_many_connect_new(docker_gcs):
 
     def task(i):
         # first instance is made within thread - creating loop
-        GCSFileSystem(token="anon", endpoint_url=docker_gcs).ls("")
+        GCSFileSystem(endpoint_url=docker_gcs).ls("")
         return True
 
     pool = ThreadPool(processes=20)
@@ -1056,7 +1056,6 @@ def test_attrs(gcs):
 
 def test_request_user_project(gcs):
     gcs = GCSFileSystem(
-        token="anon",
         endpoint_url=gcs._endpoint,
         requester_pays=True,
         project=TEST_PROJECT,
@@ -1077,9 +1076,7 @@ def test_request_user_project(gcs):
 
 
 def test_request_user_project_string(gcs):
-    gcs = GCSFileSystem(
-        token="anon", endpoint_url=gcs._endpoint, requester_pays=TEST_PROJECT
-    )
+    gcs = GCSFileSystem(endpoint_url=gcs._endpoint, requester_pays=TEST_PROJECT)
     assert gcs.requester_pays == TEST_PROJECT
     # test directly against `_call` to inspect the result
     r = gcs.call(
@@ -1097,7 +1094,7 @@ def test_request_user_project_string(gcs):
 
 
 def test_request_header(gcs):
-    gcs = GCSFileSystem(token="anon", endpoint_url=gcs._endpoint, requester_pays=True)
+    gcs = GCSFileSystem(endpoint_url=gcs._endpoint, requester_pays=True)
     # test directly against `_call` to inspect the result
     r = gcs.call(
         "GET",
