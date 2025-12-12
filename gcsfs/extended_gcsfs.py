@@ -49,7 +49,14 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         super().__init__(*args, **kwargs)
         self.grpc_client = None
         self.storage_control_client = None
+        # Adds user-passed credentials to ExtendedGcsFileSystem to pass to gRPC/Storage Control clients.
+        # We unwrap the nested credentials here because self.credentials is a GCSFS wrapper,
+        # but the clients expect the underlying google.auth credentials object.
         self.credential = self.credentials.credentials
+        # When token="anon", self.credentials.credentials is None. This is
+        # often used for testing with emulators. However, the gRPC and storage
+        # control clients require a credentials object for initialization.
+        # We explicitly use AnonymousCredentials() to allow unauthenticated access.
         if self.credentials.token == "anon":
             self.credential = AnonymousCredentials()
         # initializing grpc and storage control client for Hierarchical and
@@ -136,9 +143,9 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             self,
             path,
             mode,
-            block_size,
+            block_size=block_size or self.default_block_size,
             cache_options=cache_options,
-            consistency=consistency,
+            consistency=consistency or self.consistency,
             metadata=metadata,
             acl=acl,
             autocommit=autocommit,
