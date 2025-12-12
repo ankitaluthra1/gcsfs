@@ -13,6 +13,7 @@ from google.cloud.storage._experimental.asyncio.async_multi_range_downloader imp
 )
 from google.cloud.storage.exceptions import DataCorruption
 
+from gcsfs.checkers import ConsistencyChecker, MD5Checker, SizeChecker
 from gcsfs.extended_gcsfs import BucketType
 from gcsfs.tests.conftest import (
     _MULTI_THREADED_TEST_DATA_SIZE,
@@ -45,12 +46,12 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture
-def zonal_mocks():
-    """A factory fixture for mocking Zonal bucket functionality."""
+def gcs_bucket_mocks():
+    """A factory fixture for mocking bucket functionality for different bucket types."""
 
     @contextlib.contextmanager
-    def _zonal_mocks_factory(file_data):
-        """Creates mocks for a given file content."""
+    def _gcs_bucket_mocks_factory(file_data, bucket_type_val):
+        """Creates mocks for a given file content and bucket type."""
         is_real_gcs = (
             os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
         )
@@ -84,12 +85,11 @@ def zonal_mocks():
         mock_create_mrd = mock.AsyncMock(return_value=mock_downloader)
         with (
             mock.patch(
-                patch_target_sync_lookup_bucket_type,
-                return_value=BucketType.ZONAL_HIERARCHICAL,
+                patch_target_sync_lookup_bucket_type, return_value=bucket_type_val
             ) as mock_sync_lookup_bucket_type,
             mock.patch(
                 patch_target_lookup_bucket_type,
-                return_value=BucketType.ZONAL_HIERARCHICAL,
+                return_value=bucket_type_val,
             ),
             mock.patch(patch_target_create_mrd, mock_create_mrd),
             mock.patch(
@@ -106,7 +106,7 @@ def zonal_mocks():
             # Common assertion for all tests using this mock
             mock_cat_file.assert_not_called()
 
-    yield _zonal_mocks_factory
+    return _gcs_bucket_mocks_factory
 
 
 read_block_params = [
@@ -129,13 +129,15 @@ read_block_params = [
 ]
 
 
-def test_read_block_zb(extended_gcsfs, zonal_mocks, subtests):
+def test_read_block_zb(extended_gcsfs, gcs_bucket_mocks, subtests):
     for param in read_block_params:
         with subtests.test(id=param.id):
             offset, length, delimiter, expected_data = param.values
             path = file_path
 
-            with zonal_mocks(json_data) as mocks:
+            with gcs_bucket_mocks(
+                json_data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
+            ) as mocks:
                 result = extended_gcsfs.read_block(path, offset, length, delimiter)
 
                 assert result == expected_data
@@ -151,12 +153,54 @@ def test_read_block_zb(extended_gcsfs, zonal_mocks, subtests):
                         mocks["downloader"].download_ranges.assert_not_called()
 
 
-def test_read_small_zb(extended_gcsfs, zonal_mocks):
+@pytest.mark.parametrize("bucket_type_val", list(BucketType))
+def test_open_uses_correct_blocksize_and_consistency_for_all_bucket_types(
+    extended_gcs_factory, gcs_bucket_mocks, bucket_type_val
+):
     csv_file = "2014-01-01.csv"
     csv_file_path = f"{TEST_ZONAL_BUCKET}/{csv_file}"
     csv_data = csv_files[csv_file]
 
-    with zonal_mocks(csv_data) as mocks:
+    custom_filesystem_block_size = 100 * 1024 * 1024
+    extended_gcsfs = extended_gcs_factory(
+        block_size=custom_filesystem_block_size, consistency="md5"
+    )
+
+    with gcs_bucket_mocks(csv_data, bucket_type_val=bucket_type_val):
+        with extended_gcsfs.open(csv_file_path, "rb") as f:
+            assert f.blocksize == custom_filesystem_block_size
+            assert isinstance(f.checker, MD5Checker)
+
+        file_block_size = 1024 * 1024
+        with extended_gcsfs.open(
+            csv_file_path, "rb", block_size=file_block_size, consistency="size"
+        ) as f:
+            assert f.blocksize == file_block_size
+            assert isinstance(f.checker, SizeChecker)
+
+
+@pytest.mark.parametrize("bucket_type_val", list(BucketType))
+def test_open_uses_default_blocksize_and_consistency_from_fs(
+    extended_gcsfs, gcs_bucket_mocks, bucket_type_val
+):
+    csv_file = "2014-01-01.csv"
+    csv_file_path = f"{TEST_ZONAL_BUCKET}/{csv_file}"
+    csv_data = csv_files[csv_file]
+
+    with gcs_bucket_mocks(csv_data, bucket_type_val=bucket_type_val):
+        with extended_gcsfs.open(csv_file_path, "rb") as f:
+            assert f.blocksize == extended_gcsfs.default_block_size
+            assert type(f.checker) is ConsistencyChecker
+
+
+def test_read_small_zb(extended_gcsfs, gcs_bucket_mocks):
+    csv_file = "2014-01-01.csv"
+    csv_file_path = f"{TEST_ZONAL_BUCKET}/{csv_file}"
+    csv_data = csv_files[csv_file]
+
+    with gcs_bucket_mocks(
+        csv_data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
+    ) as mocks:
         with extended_gcsfs.open(csv_file_path, "rb", block_size=10) as f:
             out = []
             i = 1
@@ -175,21 +219,21 @@ def test_read_small_zb(extended_gcsfs, zonal_mocks):
                 )
 
 
-def test_readline_zb(extended_gcsfs, zonal_mocks):
+def test_readline_zb(extended_gcsfs, gcs_bucket_mocks):
     all_items = chain.from_iterable(
         [files.items(), csv_files.items(), text_files.items()]
     )
     for k, data in all_items:
-        with zonal_mocks(data):
+        with gcs_bucket_mocks(data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL):
             with extended_gcsfs.open("/".join([TEST_ZONAL_BUCKET, k]), "rb") as f:
                 result = f.readline()
                 expected = data.split(b"\n")[0] + (b"\n" if data.count(b"\n") else b"")
             assert result == expected
 
 
-def test_readline_from_cache_zb(extended_gcsfs, zonal_mocks):
+def test_readline_from_cache_zb(extended_gcsfs, gcs_bucket_mocks):
     data = text_files["zonal/test/a"]
-    with zonal_mocks(data):
+    with gcs_bucket_mocks(data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL):
         with extended_gcsfs.open(a, "rb") as f:
             result = f.readline()
             assert result == b"a,b\n"
@@ -207,17 +251,17 @@ def test_readline_from_cache_zb(extended_gcsfs, zonal_mocks):
             assert f.cache.cache == data
 
 
-def test_readline_empty_zb(extended_gcsfs, zonal_mocks):
+def test_readline_empty_zb(extended_gcsfs, gcs_bucket_mocks):
     data = text_files["zonal/test/b"]
-    with zonal_mocks(data):
+    with gcs_bucket_mocks(data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL):
         with extended_gcsfs.open(b, "rb") as f:
             result = f.readline()
             assert result == data
 
 
-def test_readline_blocksize_zb(extended_gcsfs, zonal_mocks):
+def test_readline_blocksize_zb(extended_gcsfs, gcs_bucket_mocks):
     data = text_files["zonal/test/c"]
-    with zonal_mocks(data):
+    with gcs_bucket_mocks(data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL):
         with extended_gcsfs.open(c, "rb", block_size=2**18) as f:
             result = f.readline()
             expected = b"ab\n"
@@ -271,11 +315,13 @@ def test_process_limits_parametrized(
     "exception_to_raise",
     [ValueError, DataCorruption, Exception],
 )
-def test_mrd_exception_handling(extended_gcsfs, zonal_mocks, exception_to_raise):
+def test_mrd_exception_handling(extended_gcsfs, gcs_bucket_mocks, exception_to_raise):
     """
     Tests that _cat_file correctly propagates exceptions from mrd.download_ranges.
     """
-    with zonal_mocks(json_data) as mocks:
+    with gcs_bucket_mocks(
+        json_data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
+    ) as mocks:
         if extended_gcsfs.on_google:
             pytest.skip("Cannot mock exceptions on real GCS")
 
@@ -294,12 +340,6 @@ def test_mrd_exception_handling(extended_gcsfs, zonal_mocks, exception_to_raise)
             extended_gcsfs.read_block(file_path, 0, 10)
 
         mocks["downloader"].download_ranges.assert_called_once()
-
-
-def _generate_large_test_data(size_bytes):
-    """Generates a byte string of the specified size with repeating pattern."""
-    pattern = b"0123456789abcdef"
-    return pattern * (size_bytes // len(pattern)) + pattern[: size_bytes % len(pattern)]
 
 
 _MULTI_THREADED_TEST_FILE = "multi_threaded_test_file"
@@ -331,12 +371,14 @@ def _read_range_from_fs(fs, path, offset, length, block_size=None):
         return f.read(length)
 
 
-def test_multithreaded_read_disjoint_ranges_zb(extended_gcsfs, zonal_mocks):
+def test_multithreaded_read_disjoint_ranges_zb(extended_gcsfs, gcs_bucket_mocks):
     """
     Tests concurrent reads of disjoint ranges from the same file.
     Verifies that different parts of the file can be fetched simultaneously without data mix-up.
     """
-    with zonal_mocks(_MULTI_THREADED_TEST_DATA) as mocks:
+    with gcs_bucket_mocks(
+        _MULTI_THREADED_TEST_DATA, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
+    ) as mocks:
         read_tasks = [
             (extended_gcsfs, _MULTI_THREADED_TEST_FILE_PATH, 0, 1024),
             (extended_gcsfs, _MULTI_THREADED_TEST_FILE_PATH, 2048, 1024),
@@ -357,11 +399,13 @@ def test_multithreaded_read_disjoint_ranges_zb(extended_gcsfs, zonal_mocks):
             assert mocks["downloader"].close.call_count == len(read_tasks)
 
 
-def test_multithreaded_read_overlapping_ranges_zb(extended_gcsfs, zonal_mocks):
+def test_multithreaded_read_overlapping_ranges_zb(extended_gcsfs, gcs_bucket_mocks):
     """
     Tests concurrent reads of overlapping ranges from the same file.
     """
-    with zonal_mocks(_MULTI_THREADED_TEST_DATA) as mocks:
+    with gcs_bucket_mocks(
+        _MULTI_THREADED_TEST_DATA, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
+    ) as mocks:
         read_tasks = [
             (extended_gcsfs, _MULTI_THREADED_TEST_FILE_PATH, 0, 2048),
             (
@@ -392,12 +436,14 @@ def test_multithreaded_read_overlapping_ranges_zb(extended_gcsfs, zonal_mocks):
             assert mocks["downloader"].close.call_count == len(read_tasks)
 
 
-def test_multithreaded_read_chunk_boundary_zb(extended_gcsfs, zonal_mocks):
+def test_multithreaded_read_chunk_boundary_zb(extended_gcsfs, gcs_bucket_mocks):
     """
     Tests concurrent reads that straddle internal buffering chunk boundaries.
     Verifies correct stitching of data from multiple internal requests.
     """
-    with zonal_mocks(_MULTI_THREADED_TEST_DATA) as mocks:
+    with gcs_bucket_mocks(
+        _MULTI_THREADED_TEST_DATA, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
+    ) as mocks:
         # Read ranges that straddle _TEST_BLOCK_SIZE boundaries
         read_tasks = [
             (
@@ -469,12 +515,14 @@ def _read_random_range(fs, path, file_size, read_length):
         return f.read(read_length)
 
 
-def test_multithreaded_read_high_concurrency_zb(extended_gcsfs, zonal_mocks):
+def test_multithreaded_read_high_concurrency_zb(extended_gcsfs, gcs_bucket_mocks):
     """
     Tests high-concurrency reads to stress the connection pooling and handling.
     Verifies that many concurrent requests do not lead to crashes or deadlocks.
     """
-    with zonal_mocks(_MULTI_THREADED_TEST_DATA) as mocks:
+    with gcs_bucket_mocks(
+        _MULTI_THREADED_TEST_DATA, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
+    ) as mocks:
         read_tasks = [
             (
                 extended_gcsfs,
@@ -503,14 +551,18 @@ def test_multithreaded_read_high_concurrency_zb(extended_gcsfs, zonal_mocks):
             assert mocks["downloader"].close.call_count == _NUM_CONCURRENCY_THREADS
 
 
-def test_multithreaded_read_one_fails_others_survive_zb(extended_gcsfs, zonal_mocks):
+def test_multithreaded_read_one_fails_others_survive_zb(
+    extended_gcsfs, gcs_bucket_mocks
+):
     """
     Tests fault tolerance: one thread's read operation fails, but others complete successfully.
     """
     if extended_gcsfs.on_google:
         pytest.skip("Cannot mock failures on real GCS")
 
-    with zonal_mocks(_MULTI_THREADED_TEST_DATA) as mocks:
+    with gcs_bucket_mocks(
+        _MULTI_THREADED_TEST_DATA, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
+    ) as mocks:
         original_download_ranges_side_effect = mocks[
             "downloader"
         ].download_ranges.side_effect
@@ -583,11 +635,13 @@ def test_multithreaded_read_one_fails_others_survive_zb(extended_gcsfs, zonal_mo
         assert mocks["downloader"].close.call_count == _NUM_FAIL_SURVIVE_THREADS
 
 
-def test_mrd_stream_cleanup(extended_gcsfs, zonal_mocks):
+def test_mrd_stream_cleanup(extended_gcsfs, gcs_bucket_mocks):
     """
     Tests that mrd stream is properly closed with file closure.
     """
-    with zonal_mocks(json_data) as mocks:
+    with gcs_bucket_mocks(
+        json_data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
+    ) as mocks:
         if not extended_gcsfs.on_google:
 
             def close_side_effect():
