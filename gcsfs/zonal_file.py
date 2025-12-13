@@ -160,10 +160,12 @@ class ZonalFile(GCSFile):
         Closes the ZonalFile and the underlying AsyncMultiRangeDownloader and AsyncAppendableObjectWriter.
         If in write mode, finalizes the write if autocommit is True.
         """
+        if self.closed:
+            return
+        super().close()
         if hasattr(self, "mrd") and self.mrd:
             asyn.sync(self.gcsfs.loop, self.mrd.close)
         if hasattr(self, "aaow") and self.aaow:
             asyn.sync(
                 self.gcsfs.loop, self.aaow.close, finalize_on_close=self.autocommit
             )
-        super().close()

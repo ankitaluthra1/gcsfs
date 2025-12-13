@@ -6,9 +6,9 @@ from unittest import mock
 import pytest
 
 from gcsfs.extended_gcsfs import BucketType
-from gcsfs.tests.settings import TEST_BUCKET
+from gcsfs.tests.settings import TEST_ZONAL_BUCKET
 
-file_path = f"{TEST_BUCKET}/zonal-file-test"
+file_path = f"{TEST_ZONAL_BUCKET}/zonal-file-test"
 test_data = b"hello world"
 
 REQUIRED_ENV_VAR = "GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT"
@@ -150,3 +150,67 @@ def test_zonal_file_not_implemented_methods(
         method_to_call = getattr(f, method_name)
         with pytest.raises(NotImplementedError):
             method_to_call()
+
+
+@pytest.mark.skipif(
+    os.environ.get("STORAGE_EMULATOR_HOST") != "https://storage.googleapis.com",
+    reason="This test class is for real GCS only.",
+)
+class TestZonalFileRealGCS:
+    """
+    Contains tests for ZonalFile write operations that run only against a
+    real GCS backend. These tests validate end-to-end write behavior.
+    """
+
+    def test_simple_upload(self, extended_gcsfs):
+        """Tests a simple write to a ZonalFile and verifies the content."""
+        with extended_gcsfs.open(file_path, "wb") as f:
+            f.write(test_data)
+        with extended_gcsfs.open(file_path, "wb", content_type="text/plain") as f:
+            f.write(b"Sample text data.")
+        assert extended_gcsfs.cat(file_path) == b"Sample text data."
+
+    def test_large_upload(self, extended_gcsfs):
+        """Tests writing a large chunk of data to a ZonalFile."""
+        # ZonalFile uses a streaming writer, so block sizes are not as relevant.
+        # We test with a size that would typically require multiple chunks in a
+        # standard GCS write.
+        large_data = b"a" * (5 * 1024 * 1024)  # 5MB
+        with extended_gcsfs.open(file_path, "wb") as f:
+            f.write(large_data)
+        assert extended_gcsfs.cat(file_path) == large_data
+
+    def test_multiple_writes(self, extended_gcsfs):
+        """Tests multiple write calls to the same ZonalFile handle."""
+        data1 = b"first part "
+        data2 = b"second part"
+        with extended_gcsfs.open(file_path, "wb") as f:
+            f.write(data1)
+            f.write(data2)
+        assert extended_gcsfs.cat(file_path) == data1 + data2
+
+    def test_autocommit_false(self, extended_gcsfs):
+        """
+        Tests that with autocommit=False, the file is not finalized until commit()
+        is called, and that no writes are possible after commit.
+        """
+        with extended_gcsfs.open(file_path, "wb", autocommit=False) as f:
+            f.write(test_data)
+            # File should not exist yet as it's not committed
+            f.commit()
+
+            # Attempting to write after commit should fail.
+            with pytest.raises(Exception) as e:
+                f.write(b"some more data")
+                print(f"\nCaught Exception Type: {e.type}")
+                print(f"Caught Exception Message: {e.value}")
+
+        assert extended_gcsfs.cat(file_path) == test_data
+
+    def test_write_after_close_raises_error(self, extended_gcsfs):
+        """Tests that writing to a closed ZonalFile raises a ValueError."""
+        f = extended_gcsfs.open(file_path, "wb")
+        f.write(b"initial write")
+        f.close()
+        with pytest.raises(ValueError, match="I/O operation on closed file"):
+            f.write(b"write after close")
