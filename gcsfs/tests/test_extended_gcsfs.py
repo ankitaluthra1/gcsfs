@@ -77,7 +77,7 @@ def gcs_bucket_mocks():
         with (
             mock.patch(
                 patch_target_get_bucket_type,
-                return_value=BucketType.ZONAL_HIERARCHICAL,
+                return_value=bucket_type_val,
             ) as mock_get_bucket_type,
             mock.patch(patch_target_create_mrd, mock_create_mrd),
             mock.patch(
