@@ -1,7 +1,6 @@
 import logging
 import os
 import statistics
-import sys
 import uuid
 from typing import Any, Callable, List
 
@@ -202,7 +201,7 @@ def with_file_sizes(base_cases_func: Callable) -> Callable:
 
     if not BENCHMARK_FILE_SIZES_MB:
         logging.error("No file sizes defined. Please set GCSFS_BENCHMARK_FILE_SIZES.")
-        sys.exit(1)
+        pytest.fail("No file sizes defined")
 
     def wrapper():
         base_cases = base_cases_func()
