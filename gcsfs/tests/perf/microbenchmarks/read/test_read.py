@@ -78,7 +78,7 @@ def test_read_single_threaded(benchmark, gcsfs_benchmark_read_write):
         benchmark.pedantic(op, args=op_args, rounds=params.rounds)
     elif params.pattern == "rand":
         offsets = list(range(0, params.file_size_bytes, params.chunk_size_bytes))
-        op = _read_op_rand
+        op = _random_read_worker
         op_args = (gcs, path, params.chunk_size_bytes, offsets)
         benchmark.pedantic(op, args=op_args, rounds=params.rounds)
 

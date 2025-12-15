@@ -3,7 +3,7 @@ import os
 import statistics
 import sys
 import uuid
-from typing import Any, Callable, List, Tuple
+from typing import Any, Callable, List
 
 import pytest
 
@@ -84,7 +84,6 @@ if benchmark_plugin_installed:
                 del bench.extra_info["mean_time"]
                 del bench.extra_info["median_time"]
                 del bench.extra_info["stddev_time"]
-                del bench.extra_info["rounds"]
 
 
 def publish_benchmark_extra_info(
@@ -142,6 +141,56 @@ def publish_multi_process_benchmark_extra_info(
     benchmark.extra_info["stddev_time"] = stddev_time
 
 
+def with_processes(base_cases_func: Callable) -> Callable:
+    """
+    A decorator that generates benchmark cases for different process counts.
+
+    It reads process counts from the BENCHMARK_PROCESSES setting and creates
+    variants for each specified count, updating the case name, num_processes,
+    and num_files.
+    """
+    from gcsfs.tests.settings import BENCHMARK_PROCESSES
+
+    def wrapper():
+        base_cases = base_cases_func()
+        new_cases = []
+        for case in base_cases:
+            for procs in BENCHMARK_PROCESSES:
+                new_case = case.__class__(**case.__dict__)
+                new_case.num_processes = procs
+                new_case.num_files = new_case.num_threads * procs
+                new_case.name = f"{case.name}_{procs}procs"
+                new_cases.append(new_case)
+        return new_cases
+
+    return wrapper
+
+
+def with_threads(base_cases_func: Callable) -> Callable:
+    """
+    A decorator that generates benchmark cases for different thread counts.
+
+    It reads thread counts from the BENCHMARK_THREADS setting and creates
+    variants for each specified count, updating the case name and num_threads.
+    num_files will be updated by with_processes decorator.
+    """
+    from gcsfs.tests.settings import BENCHMARK_THREADS
+
+    def wrapper():
+        base_cases = base_cases_func()
+        new_cases = []
+        for case in base_cases:
+            for threads in BENCHMARK_THREADS:
+                new_case = case.__class__(**case.__dict__)
+                new_case.num_threads = threads
+                new_case.num_files = threads * new_case.num_processes
+                new_case.name = f"{case.name}_{threads}threads"
+                new_cases.append(new_case)
+        return new_cases
+
+    return wrapper
+
+
 def with_file_sizes(base_cases_func: Callable) -> Callable:
     """
     A decorator that generates benchmark cases for different file sizes.
@@ -162,26 +211,41 @@ def with_file_sizes(base_cases_func: Callable) -> Callable:
             for size_mb in BENCHMARK_FILE_SIZES_MB:
                 new_case = case.__class__(**case.__dict__)
                 new_case.file_size_bytes = size_mb * MB
-                new_case.name = f"{case.name}_{size_mb}mb_file"
+                new_case.name = f"{case.name}_{size_mb}MB_file"
                 new_cases.append(new_case)
         return new_cases
 
     return wrapper
 
 
-def with_bucket_types(bucket_configs: List[Tuple[str, str]]) -> Callable:
+def _get_bucket_name_for_type(bucket_type: str) -> str:
+    """Returns the bucket name variable for a given bucket type."""
+    from gcsfs.tests.settings import TEST_BUCKET, TEST_HNS_BUCKET, TEST_ZONAL_BUCKET
+
+    if bucket_type == "regional":
+        return TEST_BUCKET
+    if bucket_type == "zonal":
+        return TEST_ZONAL_BUCKET
+    if bucket_type == "hns":
+        return TEST_HNS_BUCKET
+    return ""
+
+
+def with_bucket_types(bucket_types: List[str]) -> Callable:
     """
     A decorator that generates benchmark cases for different bucket types.
 
     Args:
-        bucket_configs: A list of tuples, where each tuple contains the
-                        bucket name and a descriptive tag (e.g., "regional").
+        bucket_types: A list of bucket type tags (e.g., "regional", "zonal").
     """
 
     def decorator(base_cases_func):
         def wrapper():
             base_cases = base_cases_func()
             all_cases = []
+            bucket_configs = [
+                (_get_bucket_name_for_type(tag), tag) for tag in bucket_types
+            ]
             for case in base_cases:
                 for bucket_name, bucket_tag in bucket_configs:
                     if bucket_name:  # Only create cases if bucket is specified

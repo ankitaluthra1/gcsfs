@@ -8,13 +8,21 @@ import sys
 from datetime import datetime
 
 import numpy as np
+from conftest import MB
 from prettytable import PrettyTable
-
-from gcsfs.tests.perf.microbenchmarks.conftest import MB
 
 
 def _setup_environment(args):
-    """Validates arguments and sets up environment variables for the benchmark run."""
+    """
+    Validate command-line arguments and configure environment variables.
+
+    This function checks for required arguments (like bucket names) and sets
+    up the necessary environment variables for the benchmark execution.
+
+    Args:
+        args (argparse.Namespace): The parsed command-line arguments.
+
+    """
     # Validate that at least one bucket is provided
     if not any([args.regional_bucket, args.zonal_bucket, args.hns_bucket]):
         logging.error(
@@ -35,17 +43,22 @@ def _setup_environment(args):
     os.environ["GCSFS_BENCHMARK_SKIP_TESTS"] = "false"
 
     if args.config:
-        os.environ["GCSFS_BENCHMARK_FILTER"] = args.config
-
-    # Set file sizes from arguments if provided by the user
-    if args.file_sizes:
-        file_sizes_str = ",".join(map(str, args.file_sizes))
-        os.environ["GCSFS_BENCHMARK_FILE_SIZES"] = file_sizes_str
+        os.environ["GCSFS_BENCHMARK_FILTER"] = ",".join(args.config)
 
 
 def _run_benchmarks(results_dir, args):
-    """
-    Sets environment variables and runs pytest for the specified benchmark group.
+    """Execute the benchmark suite using pytest.
+
+    This function constructs and runs a pytest command to execute the benchmarks.
+    It captures the output in a JSON file and handles logging and test filtering
+    based on the provided arguments.
+
+    Args:
+        results_dir (str): The directory where benchmark results will be saved.
+        args (argparse.Namespace): The parsed command-line arguments.
+
+    Returns:
+        str: The path to the generated JSON results file.
     """
     logging.info(f"Starting benchmark run for group: {args.group}")
 
@@ -99,9 +112,62 @@ def _run_benchmarks(results_dir, args):
         sys.exit(1)
 
 
-def _generate_report(json_path, results_dir):
+def _process_benchmark_result(bench, headers, extra_info_headers, stats_headers):
     """
-    Parses the benchmark JSON output and generates a CSV summary report.
+    Process a single benchmark result and prepare it for CSV reporting.
+
+    This function extracts relevant statistics and metadata from a benchmark
+    run, calculates derived metrics like percentiles and throughput, and
+    formats it as a dictionary.
+
+    Args:
+        bench (dict): The dictionary for a single benchmark from the JSON output.
+        headers (list): The list of all header names for the CSV.
+        extra_info_headers (list): Headers from the 'extra_info' section.
+        stats_headers (list): Headers from the 'stats' section.
+
+    """
+    row = {h: "" for h in headers}
+    row["name"] = bench["name"]
+    row["group"] = bench.get("group", "")
+
+    # Populate extra_info and stats
+    for key in extra_info_headers:
+        row[key] = bench["extra_info"].get(key)
+    for key in stats_headers:
+        row[key] = bench["stats"].get(key)
+
+    # Calculate percentiles
+    timings = bench["stats"].get("data")
+    if timings:
+        row["p90"] = np.percentile(timings, 90)
+        row["p95"] = np.percentile(timings, 95)
+        row["p99"] = np.percentile(timings, 99)
+
+    # Calculate max throughput
+    file_size = bench["extra_info"].get("file_size", 0)
+    num_files = bench["extra_info"].get("num_files", 1)
+    total_bytes = file_size * num_files
+
+    min_time = bench["stats"].get("min")
+    if min_time and min_time > 0:
+        row["max_throughput_MB/s"] = (total_bytes / min_time) / MB
+    else:
+        row["max_throughput_MB/s"] = "0.0"
+
+    return row
+
+
+def _generate_report(json_path, results_dir):
+    """Generate a CSV summary report from the pytest-benchmark JSON output.
+
+    Args:
+        json_path (str): The path to the JSON file containing benchmark results.
+        results_dir (str): The directory where the CSV report will be saved.
+
+    Returns:
+        str: The path to the generated CSV report file.
+
     """
     logging.info(f"Generating CSV report from {json_path}")
 
@@ -123,31 +189,9 @@ def _generate_report(json_path, results_dir):
         writer.writerow(headers)
 
         for bench in data["benchmarks"]:
-            row = {h: "" for h in headers}
-            row["name"] = bench["name"]
-            row["group"] = bench.get("group", "")
-
-            # Populate extra_info and stats
-            for key in extra_info_headers:
-                row[key] = bench["extra_info"].get(key)
-            for key in stats_headers:
-                row[key] = bench["stats"].get(key)
-
-            # Calculate percentiles
-            timings = bench["stats"].get("data")
-            if timings:
-                row["p90"] = np.percentile(timings, 90)
-                row["p95"] = np.percentile(timings, 95)
-                row["p99"] = np.percentile(timings, 99)
-
-            # Calculate max throughput
-            total_bytes = bench["extra_info"].get("file_size", 0) * bench[
-                "extra_info"
-            ].get("num_files", 1)
-            min_time = bench["stats"].get("min")
-            if min_time and min_time > 0:
-                row["max_throughput_MB/s"] = (total_bytes / min_time) / MB
-
+            row = _process_benchmark_result(
+                bench, headers, extra_info_headers, stats_headers
+            )
             writer.writerow([row[h] for h in headers])
 
     logging.info(f"CSV report generated at {report_path}")
@@ -155,9 +199,42 @@ def _generate_report(json_path, results_dir):
     return report_path
 
 
-def _print_csv_to_shell(report_path):
+def _create_table_row(row):
     """
-    Reads a CSV file and prints its contents to the shell as a formatted table.
+    Format a dictionary of benchmark results into a list for table display.
+
+    Args:
+        row (dict): A dictionary representing a single row from the CSV report.
+
+    Returns:
+        list: A list of formatted values ready for printing in a table.
+
+    """
+    max_throughput = row.get("max_throughput_MB/s", "")
+    if max_throughput:
+        max_throughput = f"{float(max_throughput):.4f}"
+    return [
+        row.get("bucket_type", ""),
+        row.get("group", ""),
+        row.get("pattern", ""),
+        row.get("num_files", ""),
+        row.get("threads", ""),
+        row.get("processes", ""),
+        f"{float(row.get('file_size', 0)) / MB:.2f}",
+        f"{float(row.get('chunk_size', 0)) / MB:.2f}",
+        f"{float(row.get('block_size', 0)) / MB:.2f}",
+        f"{float(row.get('min', 0)):.4f}",
+        f"{float(row.get('mean', 0)):.4f}",
+        max_throughput,
+    ]
+
+
+def _print_csv_to_shell(report_path):
+    """Read a CSV report and print it to the console as a formatted table.
+
+    Args:
+        report_path (str): The path to the CSV report file.
+
     """
     try:
         with open(report_path, "r") as f:
@@ -187,36 +264,29 @@ def _print_csv_to_shell(report_path):
         table.field_names = display_headers
 
         for row in rows:
-            table.add_row(
-                [
-                    row.get("bucket_type", ""),
-                    row.get("group", ""),
-                    row.get("pattern", ""),
-                    row.get("num_files", ""),
-                    row.get("threads", ""),
-                    row.get("processes", ""),
-                    f"{float(row.get('file_size', 0)) / MB:.2f}",
-                    f"{float(row.get('chunk_size', 0)) / MB:.2f}",
-                    f"{float(row.get('block_size', 0)) / MB:.2f}",
-                    f"{float(row.get('min', 0)):.4f}",
-                    f"{float(row.get('mean', 0)):.4f}",
-                    row.get("max_throughput_MB/s", ""),
-                ]
-            )
+            table.add_row(_create_table_row(row))
         print(table)
     except FileNotFoundError:
         logging.error(f"Report file not found at: {report_path}")
 
 
 def main():
-    """Main entry point for the benchmark execution script."""
+    """
+    Parse command-line arguments and orchestrate the benchmark execution.
+
+    This is the main entry point of the script. It sets up the environment,
+    runs the benchmarks, generates reports, and prints a summary to the console.
+
+    """
     parser = argparse.ArgumentParser(description="Run GCSFS performance benchmarks.")
     parser.add_argument(
         "--group",
         help="The benchmark group to run (e.g., 'read'). Runs all if not specified.",
     )
     parser.add_argument(
-        "--config", help="The name of the benchmark configuration to run."
+        "--config",
+        nargs="+",
+        help="The name(s) of the benchmark configuration(s) to run(e.g., --config read_seq_1thread,read_rand_1thread).",
     )
     parser.add_argument(
         "--name", help="A keyword to filter tests by name (passed to pytest -k)."
@@ -242,12 +312,6 @@ def main():
         "--log-level",
         default="DEBUG",
         help="Set pytest console logging level (e.g., DEBUG, INFO, WARNING). Only effective if --log is enabled.",
-    )
-    parser.add_argument(
-        "--file-sizes",
-        nargs="+",
-        type=int,
-        help="List of file sizes in MB to use for benchmarks (e.g., --file-sizes 128 1024). Defaults to 128MB.",
     )
     args = parser.parse_args()
 
