@@ -5,6 +5,7 @@ from itertools import chain
 from unittest import mock
 
 import pytest
+from google.api_core import exceptions as api_exceptions
 from google.cloud.storage._experimental.asyncio.async_multi_range_downloader import (
     AsyncMultiRangeDownloader,
 )
@@ -13,7 +14,7 @@ from google.cloud.storage.exceptions import DataCorruption
 from gcsfs.checkers import ConsistencyChecker, MD5Checker, SizeChecker
 from gcsfs.extended_gcsfs import BucketType
 from gcsfs.tests.conftest import csv_files, files, text_files
-from gcsfs.tests.settings import TEST_ZONAL_BUCKET
+from gcsfs.tests.settings import TEST_HNS_BUCKET, TEST_ZONAL_BUCKET
 
 file = "test/accounts.1.json"
 file_path = f"{TEST_ZONAL_BUCKET}/{file}"
@@ -101,6 +102,60 @@ def gcs_bucket_mocks():
             mock_cat_file.assert_not_called()
 
     return _gcs_bucket_mocks_factory
+
+
+@pytest.fixture
+def gcs_hns_mocks():
+    """A factory fixture for mocking bucket functionality for HNS mv tests."""
+
+    @contextlib.contextmanager
+    def _gcs_hns_mocks_factory(bucket_type_val, gcsfs):
+        """Creates mocks for a given file content and bucket type."""
+        is_real_gcs = (
+            os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
+        )
+        if is_real_gcs:
+            yield None
+            return
+
+        patch_target_lookup_bucket_type = (
+            "gcsfs.extended_gcsfs.ExtendedGcsFileSystem._lookup_bucket_type"
+        )
+        patch_target_super_mv = "gcsfs.core.GCSFileSystem.mv"
+
+        # Mock the async rename_folder method on the storage_control_client
+        mock_rename_folder = mock.AsyncMock()
+        mock_control_client_instance = mock.Mock()
+        mock_control_client_instance.rename_folder = mock_rename_folder
+
+        with (
+            mock.patch(
+                patch_target_lookup_bucket_type,
+                return_value=bucket_type_val,
+            ) as mock_async_lookup_bucket_type,
+            mock.patch(
+                "gcsfs.core.GCSFileSystem._info", new_callable=mock.AsyncMock
+            ) as mock_info,
+            mock.patch.object(
+                gcsfs, "_storage_control_client", mock_control_client_instance
+            ),
+            mock.patch(
+                patch_target_super_mv, new_callable=mock.Mock, create=True
+            ) as mock_super_mv,
+            mock.patch.object(
+                gcsfs, "invalidate_cache", wraps=gcsfs.invalidate_cache
+            ) as mock_invalidate_cache,
+        ):
+            mocks = {
+                "async_lookup_bucket_type": mock_async_lookup_bucket_type,
+                "info": mock_info,
+                "control_client": mock_control_client_instance,
+                "super_mv": mock_super_mv,
+                "invalidate_cache": mock_invalidate_cache,
+            }
+            yield mocks
+
+    return _gcs_hns_mocks_factory
 
 
 read_block_params = [
@@ -373,3 +428,219 @@ def test_mrd_stream_cleanup(extended_gcsfs, gcs_bucket_mocks):
 
         assert True is f.closed
         assert False is f.mrd.is_stream_open
+
+
+class TestExtendedGcsFileSystemMv:
+    """Unit tests for the _mv method in ExtendedGcsFileSystem."""
+
+    rename_success_params = [
+        pytest.param("old_dir", "new_dir", id="simple_rename_at_root"),
+        pytest.param(
+            "nested/old_dir",
+            "nested/new_dir",
+            id="rename_within_nested_dir",
+        ),
+    ]
+
+    @pytest.mark.parametrize("path1, path2", rename_success_params)
+    def test_hns_folder_rename_success(self, gcs_hns, gcs_hns_mocks, path1, path2):
+        """Test successful HNS folder rename."""
+        gcsfs = gcs_hns
+        path1 = f"{TEST_HNS_BUCKET}/{path1}"
+        path2 = f"{TEST_HNS_BUCKET}/{path2}"
+        gcsfs.touch(f"{path1}/file.txt")
+
+        with gcs_hns_mocks(BucketType.HIERARCHICAL, gcsfs) as mocks:
+            if mocks:
+                # Configure mocks
+                # 1. First _info call in _mv on path1 should succeed.
+                # 2. _info call in exists(path1) after mv should fail.
+                # 3. _info call in exists(path2) after mv should succeed.
+                mocks["info"].side_effect = [
+                    {"type": "directory", "name": path1},
+                    FileNotFoundError(path1),
+                    {"type": "directory", "name": path2},
+                ]
+
+            gcsfs.mv(path1, path2)
+
+            assert not gcsfs.exists(path1), "Old folder should not exist after rename."
+            assert gcsfs.exists(path2), "New folder should exist after rename."
+
+        if mocks:
+            mocks["async_lookup_bucket_type"].assert_called_once_with(TEST_HNS_BUCKET)
+            # Verify _info was awaited for path1, then path1 again, then path2
+            assert mocks["info"].await_count == 3
+            assert mocks["info"].await_args_list[0] == mock.call(path1)
+            assert mocks["info"].await_args_list[1] == mock.call(path1)
+            assert mocks["info"].await_args_list[2] == mock.call(path2)
+            mocks["control_client"].rename_folder.assert_called()
+            mocks["super_mv"].assert_not_called()
+            # Verify that invalidate_cache was called for the old path, new path,
+            # and their parents.
+            mocks["invalidate_cache"].assert_has_calls(
+                [
+                    mock.call(path1),
+                    mock.call(path2),
+                    mock.call(gcsfs._parent(path1)),
+                    mock.call(gcsfs._parent(path2)),
+                ],
+                any_order=True,
+            )
+
+    @pytest.mark.parametrize(
+        "bucket_type, info_return, path1, path2, reason",
+        [
+            (
+                BucketType.HIERARCHICAL,
+                {"type": "file"},
+                "f",
+                "f2",
+                "is a file",
+            ),
+            (
+                BucketType.NON_HIERARCHICAL,
+                {"type": "directory"},
+                "d",
+                "d2",
+                "not an HNS bucket",
+            ),
+            pytest.param(
+                BucketType.HIERARCHICAL,
+                {"type": "directory"},
+                "d",
+                "another-bucket/d",
+                "different bucket",
+                marks=pytest.mark.xfail(
+                    reason="Cross-bucket move not fully supported in test setup"
+                ),
+            ),
+            (
+                BucketType.HIERARCHICAL,
+                {"type": "directory"},
+                "d",
+                "",  # Root of bucket
+                "destination is bucket root",
+            ),
+        ],
+    )
+    def test_fallback_to_super_mv(
+        self,
+        gcs_hns,
+        gcs_hns_mocks,
+        bucket_type,
+        info_return,
+        path1,
+        path2,
+        reason,
+    ):
+        """Test scenarios that should fall back to the parent's mv method."""
+        gcsfs = gcs_hns
+        path1 = f"{TEST_HNS_BUCKET}/{path1}"
+        # Handle cross-bucket case where path2 already includes the bucket
+        if "/" in path2:
+            path2 = path2
+        else:
+            path2 = (
+                f"{TEST_HNS_BUCKET}/{path2}" if path2 != "" else f"{TEST_HNS_BUCKET}/"
+            )
+        with gcs_hns_mocks(bucket_type, gcsfs) as mocks:
+            gcsfs.touch(path1)
+            if mocks:
+                mocks["info"].side_effect = [
+                    info_return,
+                    FileNotFoundError(path1),
+                    {"type": "file", "name": path2},
+                ]
+
+            gcsfs.mv(path1, path2)
+
+            assert not gcsfs.exists(path1)
+            assert gcsfs.exists(path2)
+
+            if mocks:
+                mocks["control_client"].rename_folder.assert_not_called()
+                mocks["super_mv"].assert_called_once_with(path1, path2)
+
+    def test_mv_same_path_is_noop(self, gcs_hns, gcs_hns_mocks):
+        """Test that mv with the same source and destination path is a no-op."""
+        gcsfs = gcs_hns
+        path = f"{TEST_HNS_BUCKET}/some_path"
+
+        with gcs_hns_mocks(BucketType.HIERARCHICAL, gcsfs) as mocks:
+            gcsfs.mv(path, path)
+
+            if mocks:
+                mocks["async_lookup_bucket_type"].assert_not_called()
+                mocks["info"].assert_not_called()
+                mocks["control_client"].rename_folder.assert_not_called()
+                mocks["super_mv"].assert_not_called()
+
+    def test_hns_rename_fails_if_parent_dne(self, gcs_hns, gcs_hns_mocks):
+        """Test that HNS rename fails if the destination's parent does not exist."""
+        gcsfs = gcs_hns
+        path1 = f"{TEST_HNS_BUCKET}/dir_to_move"
+        path2 = f"{TEST_HNS_BUCKET}/new_parent/new_name"
+        gcsfs.touch(f"{path1}/file.txt")  # Setup for real GCS
+
+        with gcs_hns_mocks(BucketType.HIERARCHICAL, gcsfs) as mocks:
+            if mocks:
+                # Mocked environment assertions
+                mocks["info"].return_value = {"type": "directory"}
+                mocks["control_client"].rename_folder.side_effect = (
+                    api_exceptions.FailedPrecondition(
+                        "The parent folder does not exist."
+                    )
+                )
+
+            # The underlying API error includes the status code (400) in its string representation.
+            expected_msg = "HNS rename failed: 400 The parent folder does not exist."
+            with pytest.raises(OSError, match=expected_msg):
+                gcsfs.mv(path1, path2)
+
+            if mocks:
+                mocks["control_client"].rename_folder.assert_called()
+                mocks["super_mv"].assert_not_called()
+
+    def test_hns_rename_raises_file_not_found(self, gcs_hns, gcs_hns_mocks):
+        """Test that NotFound from API raises FileNotFoundError."""
+        gcsfs = gcs_hns
+        with gcs_hns_mocks(BucketType.HIERARCHICAL, gcsfs) as mocks:
+            if mocks:
+                mocks["info"].return_value = {"type": "directory"}
+                mocks["control_client"].rename_folder.side_effect = (
+                    api_exceptions.NotFound("Folder not found")
+                )
+
+            path1 = f"{TEST_HNS_BUCKET}/dne"
+            path2 = f"{TEST_HNS_BUCKET}/new_dir"
+
+            with pytest.raises(FileNotFoundError):
+                gcsfs.mv(path1, path2)
+
+            if mocks:
+                mocks["super_mv"].assert_not_called()
+                mocks["control_client"].rename_folder.assert_called()
+
+    def test_hns_rename_raises_os_error(self, gcs_hns, gcs_hns_mocks):
+        """Test that FailedPrecondition from API raises OSError."""
+        gcsfs = gcs_hns
+        path1 = f"{TEST_HNS_BUCKET}/dir"
+        path2 = f"{TEST_HNS_BUCKET}/existing_dir"
+        gcsfs.touch(f"{path1}/file.txt")
+        gcsfs.touch(f"{path2}/file.txt")
+
+        with gcs_hns_mocks(BucketType.HIERARCHICAL, gcsfs) as mocks:
+            if mocks:
+                mocks["info"].return_value = {"type": "directory"}
+                mocks["control_client"].rename_folder.side_effect = (
+                    api_exceptions.Conflict("Destination already exists")
+                )
+
+            expected_msg = f"HNS rename failed: Destination already exists: {path2}"
+            with pytest.raises(FileExistsError, match=expected_msg):
+                gcsfs.mv(path1, path2)
+
+            if mocks:
+                mocks["super_mv"].assert_not_called()
+                mocks["control_client"].rename_folder.assert_called()
