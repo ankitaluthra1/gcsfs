@@ -121,33 +121,39 @@ def gcs_hns_mocks():
         patch_target_lookup_bucket_type = (
             "gcsfs.extended_gcsfs.ExtendedGcsFileSystem._lookup_bucket_type"
         )
+        patch_target_sync_lookup_bucket_type = (
+            "gcsfs.extended_gcsfs.ExtendedGcsFileSystem._sync_lookup_bucket_type"
+        )
         patch_target_super_mv = "gcsfs.core.GCSFileSystem.mv"
 
         # Mock the async rename_folder method on the storage_control_client
         mock_rename_folder = mock.AsyncMock()
-        mock_control_client_instance = mock.Mock()
+        mock_control_client_instance = mock.AsyncMock()
         mock_control_client_instance.rename_folder = mock_rename_folder
 
         with (
             mock.patch(
-                patch_target_lookup_bucket_type,
-                return_value=bucket_type_val,
+                patch_target_lookup_bucket_type, new_callable=mock.AsyncMock
             ) as mock_async_lookup_bucket_type,
+            mock.patch(
+                patch_target_sync_lookup_bucket_type
+            ) as mock_sync_lookup_bucket_type,
             mock.patch(
                 "gcsfs.core.GCSFileSystem._info", new_callable=mock.AsyncMock
             ) as mock_info,
             mock.patch.object(
                 gcsfs, "_storage_control_client", mock_control_client_instance
             ),
-            mock.patch(
-                patch_target_super_mv, new_callable=mock.Mock, create=True
-            ) as mock_super_mv,
+            mock.patch(patch_target_super_mv, new_callable=mock.Mock) as mock_super_mv,
             mock.patch.object(
                 gcsfs, "invalidate_cache", wraps=gcsfs.invalidate_cache
             ) as mock_invalidate_cache,
         ):
+            mock_async_lookup_bucket_type.return_value = bucket_type_val
+            mock_sync_lookup_bucket_type.return_value = bucket_type_val
             mocks = {
                 "async_lookup_bucket_type": mock_async_lookup_bucket_type,
+                "sync_lookup_bucket_type": mock_sync_lookup_bucket_type,
                 "info": mock_info,
                 "control_client": mock_control_client_instance,
                 "super_mv": mock_super_mv,
@@ -448,7 +454,10 @@ class TestExtendedGcsFileSystemMv:
         gcsfs = gcs_hns
         path1 = f"{TEST_HNS_BUCKET}/{path1}"
         path2 = f"{TEST_HNS_BUCKET}/{path2}"
-        gcsfs.touch(f"{path1}/file.txt")
+
+        # Setup a more complex directory structure
+        file_in_root = f"{path1}/file1.txt"
+        nested_file = f"{path1}/sub_dir/file2.txt"
 
         with gcs_hns_mocks(BucketType.HIERARCHICAL, gcsfs) as mocks:
             if mocks:
@@ -460,20 +469,31 @@ class TestExtendedGcsFileSystemMv:
                     {"type": "directory", "name": path1},
                     FileNotFoundError(path1),
                     {"type": "directory", "name": path2},
+                    {"type": "file", "name": f"{path2}/file1.txt"},
+                    {"type": "file", "name": f"{path2}/sub_dir/file2.txt"},
                 ]
 
+            gcsfs.touch(file_in_root)
+            gcsfs.touch(nested_file)
             gcsfs.mv(path1, path2)
 
-            assert not gcsfs.exists(path1), "Old folder should not exist after rename."
-            assert gcsfs.exists(path2), "New folder should exist after rename."
+            # Verify that the old path no longer exist
+            assert not gcsfs.exists(path1)
+
+            # Verify that the new paths exist
+            assert gcsfs.exists(path2)
+            assert gcsfs.exists(f"{path2}/file1.txt")
+            assert gcsfs.exists(f"{path2}/sub_dir/file2.txt")
 
         if mocks:
             mocks["async_lookup_bucket_type"].assert_called_once_with(TEST_HNS_BUCKET)
-            # Verify _info was awaited for path1, then path1 again, then path2
-            assert mocks["info"].await_count == 3
-            assert mocks["info"].await_args_list[0] == mock.call(path1)
-            assert mocks["info"].await_args_list[1] == mock.call(path1)
-            assert mocks["info"].await_args_list[2] == mock.call(path2)
+            # Verify the sequence of _info calls for mv and exists checks.
+            expected_info_calls = [
+                mock.call(path1),  # from mv
+                mock.call(path1),  # from exists(path1)
+                mock.call(path2),  # from exists(path2)
+            ]
+            mocks["info"].assert_has_awaits(expected_info_calls)
             mocks["control_client"].rename_folder.assert_called()
             mocks["super_mv"].assert_not_called()
             # Verify that invalidate_cache was called for the old path, new path,
@@ -545,14 +565,23 @@ class TestExtendedGcsFileSystemMv:
                 f"{TEST_HNS_BUCKET}/{path2}" if path2 != "" else f"{TEST_HNS_BUCKET}/"
             )
         with gcs_hns_mocks(bucket_type, gcsfs) as mocks:
-            gcsfs.touch(path1)
             if mocks:
-                mocks["info"].side_effect = [
-                    info_return,
-                    FileNotFoundError(path1),
-                    {"type": "file", "name": path2},
-                ]
+                if bucket_type in [
+                    BucketType.HIERARCHICAL,
+                    BucketType.ZONAL_HIERARCHICAL,
+                ]:
+                    mocks["info"].side_effect = [
+                        info_return,
+                        FileNotFoundError(path1),
+                        {"type": "file", "name": path2},
+                    ]
+                else:
+                    mocks["info"].side_effect = [
+                        FileNotFoundError(path1),
+                        {"type": "file", "name": path2},
+                    ]
 
+            gcsfs.touch(path1)
             gcsfs.mv(path1, path2)
 
             assert not gcsfs.exists(path1)
@@ -581,7 +610,6 @@ class TestExtendedGcsFileSystemMv:
         gcsfs = gcs_hns
         path1 = f"{TEST_HNS_BUCKET}/dir_to_move"
         path2 = f"{TEST_HNS_BUCKET}/new_parent/new_name"
-        gcsfs.touch(f"{path1}/file.txt")  # Setup for real GCS
 
         with gcs_hns_mocks(BucketType.HIERARCHICAL, gcsfs) as mocks:
             if mocks:
@@ -592,6 +620,8 @@ class TestExtendedGcsFileSystemMv:
                         "The parent folder does not exist."
                     )
                 )
+
+            gcsfs.touch(f"{path1}/file.txt")
 
             # The underlying API error includes the status code (400) in its string representation.
             expected_msg = "HNS rename failed: 400 The parent folder does not exist."
@@ -605,39 +635,69 @@ class TestExtendedGcsFileSystemMv:
     def test_hns_rename_raises_file_not_found(self, gcs_hns, gcs_hns_mocks):
         """Test that NotFound from API raises FileNotFoundError."""
         gcsfs = gcs_hns
+        path1 = f"{TEST_HNS_BUCKET}/dne"
+        path2 = f"{TEST_HNS_BUCKET}/new_dir"
         with gcs_hns_mocks(BucketType.HIERARCHICAL, gcsfs) as mocks:
             if mocks:
-                mocks["info"].return_value = {"type": "directory"}
-                mocks["control_client"].rename_folder.side_effect = (
-                    api_exceptions.NotFound("Folder not found")
-                )
-
-            path1 = f"{TEST_HNS_BUCKET}/dne"
-            path2 = f"{TEST_HNS_BUCKET}/new_dir"
+                mocks["info"].side_effect = FileNotFoundError(path1)
 
             with pytest.raises(FileNotFoundError):
                 gcsfs.mv(path1, path2)
 
             if mocks:
                 mocks["super_mv"].assert_not_called()
-                mocks["control_client"].rename_folder.assert_called()
+                mocks["control_client"].rename_folder.assert_not_called()
+
+    def test_hns_rename_raises_file_not_found_on_race_condition(
+        self, gcs_hns, gcs_hns_mocks
+    ):
+        """Test that api_exceptions.NotFound from rename call raises FileNotFoundError."""
+        is_real_gcs = (
+            os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
+        )
+        if is_real_gcs:
+            pytest.skip(
+                "Cannot simulate race condition for rename against real GCS endpoint."
+            )
+        gcsfs = gcs_hns
+        path1 = f"{TEST_HNS_BUCKET}/dir_disappears"
+        path2 = f"{TEST_HNS_BUCKET}/new_dir"
+
+        with gcs_hns_mocks(BucketType.HIERARCHICAL, gcsfs) as mocks:
+            if mocks:
+                # Simulate _info finding the directory
+                mocks["info"].return_value = {"type": "directory"}
+                # Simulate the directory being gone when rename_folder is called
+                mocks["control_client"].rename_folder.side_effect = (
+                    api_exceptions.NotFound("Folder not found during rename")
+                )
+
+            with pytest.raises(FileNotFoundError, match="Source .* not found"):
+                gcsfs.mv(path1, path2)
+
+            if mocks:
+                mocks["control_client"].rename_folder.assert_called_once()
+                mocks["super_mv"].assert_not_called()
 
     def test_hns_rename_raises_os_error(self, gcs_hns, gcs_hns_mocks):
         """Test that FailedPrecondition from API raises OSError."""
         gcsfs = gcs_hns
         path1 = f"{TEST_HNS_BUCKET}/dir"
         path2 = f"{TEST_HNS_BUCKET}/existing_dir"
-        gcsfs.touch(f"{path1}/file.txt")
-        gcsfs.touch(f"{path2}/file.txt")
 
         with gcs_hns_mocks(BucketType.HIERARCHICAL, gcsfs) as mocks:
             if mocks:
                 mocks["info"].return_value = {"type": "directory"}
                 mocks["control_client"].rename_folder.side_effect = (
-                    api_exceptions.Conflict("Destination already exists")
+                    api_exceptions.Conflict("HNS rename failed due to conflict for")
                 )
 
-            expected_msg = f"HNS rename failed: Destination already exists: {path2}"
+            gcsfs.touch(f"{path1}/file.txt")
+            gcsfs.touch(f"{path2}/file.txt")
+
+            expected_msg = (
+                f"HNS rename failed due to conflict for '{path1}' to '{path2}'"
+            )
             with pytest.raises(FileExistsError, match=expected_msg):
                 gcsfs.mv(path1, path2)
 
