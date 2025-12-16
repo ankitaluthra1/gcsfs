@@ -56,7 +56,7 @@ steps:
       - "gcsfs-test-vm-${_SHORT_BUILD_ID}"
       - "--project=${PROJECT_ID}"
       - "--zone=${_ZONE}"
-      - "--machine-type=e2-medium"
+      - "--machine-type=n2-standard-4"
       - "--image-family=debian-13"
       - "--image-project=debian-cloud"
       - "--service-account=${_ZONAL_VM_SERVICE_ACCOUNT}"
@@ -119,14 +119,13 @@ steps:
           gcsfs/ \
           --deselect gcsfs/tests/test_core.py::test_sign
 
-         # Zonal tests will be added back once the Rapid storage is enabled
-         # echo '--- Running Zonal tests on VM ---'
-         # export GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT="true"
-         # pytest -vv -s \
-         # --log-format='%(asctime)s %(levelname)s %(message)s' \
-         # --log-date-format='%H:%M:%S' \
-         # --color=no \
-         # gcsfs/tests/test_extended_gcsfs.py
+         echo '--- Running Zonal tests on VM ---'
+         export GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT="true"
+         pytest -vv -s \
+         --log-format='%(asctime)s %(levelname)s %(message)s' \
+         --log-date-format='%H:%M:%S' \
+         --color=no \
+         gcsfs/tests/test_extended_gcsfs.py
         "
 
         # Execute the script on the VM via SSH.
