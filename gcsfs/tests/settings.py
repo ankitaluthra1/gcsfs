@@ -17,7 +17,7 @@ TEST_KMS_KEY = os.getenv(
 BENCHMARK_FILTER = os.environ.get("GCSFS_BENCHMARK_FILTER", "")
 
 BENCHMARK_FILE_SIZES_MB_STR = os.environ.get(
-    "GCSFS_BENCHMARK_FILE_SIZES", "128"
+    "GCSFS_BENCHMARK_FILE_SIZES", "1024"
 )  # comma separated list of sizes in MB
 BENCHMARK_FILE_SIZES_MB = [int(s) for s in BENCHMARK_FILE_SIZES_MB_STR.split(",") if s]
 
@@ -31,10 +31,10 @@ BENCHMARK_PROCESSES_STR = os.environ.get(
 )  # comma separated list of process counts
 BENCHMARK_PROCESSES = [int(s) for s in BENCHMARK_PROCESSES_STR.split(",") if s]
 
-BENCHMARK_CHUNK_SIZE_MB = int(os.environ.get("GCSFS_BENCHMARK_CHUNK_SIZE_MB", "16"))
-BENCHMARK_BLOCK_SIZE_MB = int(os.environ.get("GCSFS_BENCHMARK_BLOCK_SIZE_MB", "16"))
+BENCHMARK_CHUNK_SIZE_MB = int(os.environ.get("GCSFS_BENCHMARK_CHUNK_SIZE_MB", "100"))
+BENCHMARK_BLOCK_SIZE_MB = int(os.environ.get("GCSFS_BENCHMARK_BLOCK_SIZE_MB", "100"))
 
-BENCHMARK_ROUNDS = int(os.environ.get("GCSFS_BENCHMARK_ROUNDS", "10"))
+BENCHMARK_ROUNDS = int(os.environ.get("GCSFS_BENCHMARK_ROUNDS", "1"))
 BENCHMARK_SKIP_TESTS = os.environ.get("GCSFS_BENCHMARK_SKIP_TESTS", "true").lower() in (
     "true",
     "1",

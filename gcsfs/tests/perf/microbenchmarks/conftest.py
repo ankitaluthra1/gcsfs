@@ -1,5 +1,6 @@
 import logging
 import os
+from resource_monitor import ResourceMonitor
 import statistics
 import uuid
 from typing import Any, Callable, List
@@ -16,6 +17,21 @@ try:
 except ImportError:
     benchmark_plugin_installed = False
 
+def _get_zonal_file_paths(bucket_name: str, num_files: int) -> List[str]:
+    """
+    Generates a list of file paths for pre-existing zonal benchmark files.
+    """
+    prefix = f"{bucket_name}/zonal-file-bench"
+    return [f"{prefix}-{i}" for i in range(num_files)]
+
+@pytest.fixture
+def monitor():
+    """
+    Provides the ResourceMonitor class. 
+    Usage: with monitor() as m: ...
+    """
+    return ResourceMonitor
+
 
 @pytest.fixture
 def gcsfs_benchmark_read_write(extended_gcs_factory, request):
@@ -28,6 +44,12 @@ def gcsfs_benchmark_read_write(extended_gcs_factory, request):
     """
     params = request.param
     gcs = extended_gcs_factory(block_size=params.block_size_bytes)
+
+    if params.bucket_type == "zonal":
+        logging.info(f"Using pre-existing zonal files for benchmark '{params.name}'.")
+        file_paths = _get_zonal_file_paths(params.bucket_name, params.num_files)
+        yield gcs, file_paths, params
+        return  # Skip cleanup for zonal files
 
     prefix = f"{params.bucket_name}/benchmark-files-{uuid.uuid4()}"
     file_paths = [f"{prefix}/file_{i}" for i in range(params.num_files)]
@@ -102,6 +124,20 @@ def publish_benchmark_extra_info(
     benchmark.extra_info["bucket_type"] = params.bucket_type
     benchmark.extra_info["processes"] = params.num_processes
     benchmark.group = benchmark_group
+
+
+def publish_resource_metrics(benchmark: Any, monitor: ResourceMonitor) -> None:
+    """
+    Helper function to publish resource monitor results to the extra_info property.
+    """
+    benchmark.extra_info.update(
+        {
+            "cpu_max_global": f"{monitor.max_cpu:.2f}",
+            "mem_max": f"{monitor.max_mem:.2f}",
+            "net_throughput_mb_s": f"{monitor.throughput_mb_s:.2f}",
+            "vcpus": monitor.vcpus,
+        }
+    )
 
 
 def publish_multi_process_benchmark_extra_info(
