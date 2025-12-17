@@ -49,7 +49,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
     to the parent class GCSFileSystem for default processing.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, asynchronous=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.grpc_client = None
         self.storage_control_client = None
@@ -65,10 +65,13 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             self.credential = AnonymousCredentials()
         # initializing grpc and storage control client for Hierarchical and
         # zonal bucket operations
-        self.grpc_client = asyn.sync(self.loop, self._create_grpc_client)
-        self._storage_control_client = asyn.sync(
-            self.loop, self._create_control_plane_client
-        )
+        self.grpc_client = None
+        self._storage_control_client = None
+        if not asynchronous:
+            self.grpc_client =  asyn.sync(self.loop, self._create_grpc_client)
+            self._storage_control_client = asyn.sync(
+                self.loop, self._create_control_plane_client
+            )
         self._storage_layout_cache = {}
 
     async def _create_grpc_client(self):
@@ -104,6 +107,10 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
     async def _get_bucket_type(self, bucket):
         try:
+
+            self._storage_control_client = self._storage_control_client or (
+                await self._create_control_plane_client()
+            )
             bucket_name_value = f"projects/_/buckets/{bucket}/storageLayout"
             response = await self._storage_control_client.get_storage_layout(
                 name=bucket_name_value
@@ -243,6 +250,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             if not await self._is_zonal_bucket(bucket):
                 return await super()._cat_file(path, start=start, end=end, **kwargs)
 
+            self.grpc_client = self.grpc_client or await self._create_grpc_client()
             mrd = await AsyncMultiRangeDownloader.create_mrd(
                 self.grpc_client, bucket, object_name, generation
             )
@@ -450,8 +458,8 @@ async def simple_upload(
             "Zonal buckets do not support content_type, metadatain, fixed_key_metadata, "
             "consistency or kms_key_name during upload. These parameters will be ignored."
         )
-
-    writer = await zb_hns_utils.init_aaow(fs.grpc_client, bucket, key)
+    gclient = AsyncGrpcClient().grpc_client
+    writer = await zb_hns_utils.init_aaow(gclient, bucket, key)
 
     try:
         await writer.append(datain)

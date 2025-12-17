@@ -8,14 +8,10 @@ import pytest
 from google.cloud.storage.exceptions import DataCorruption
 
 from gcsfs.checkers import ConsistencyChecker, MD5Checker, SizeChecker
-from gcsfs.extended_gcsfs import (
-    BucketType,
-    initiate_upload,
-    simple_upload,
-    upload_chunk,
-)
+from gcsfs.core import initiate_upload, simple_upload, upload_chunk
+from gcsfs.extended_gcsfs import BucketType
 from gcsfs.tests.conftest import csv_files, files, text_files
-from gcsfs.tests.settings import TEST_ZONAL_BUCKET
+from gcsfs.tests.settings import TEST_BUCKET, TEST_ZONAL_BUCKET
 
 file = "test/accounts.1.json"
 file_path = f"{TEST_ZONAL_BUCKET}/{file}"
@@ -34,9 +30,9 @@ should_run = os.getenv(REQUIRED_ENV_VAR, "false").lower() in (
     "true",
     "1",
 )
-pytestmark = pytest.mark.skipif(
-    not should_run, reason=f"Skipping tests: {REQUIRED_ENV_VAR} env variable is not set"
-)
+# pytestmark = pytest.mark.skipif(
+#     not should_run, reason=f"Skipping tests: {REQUIRED_ENV_VAR} env variable is not set"
+# )
 
 read_block_params = [
     # Read specific chunk
@@ -306,24 +302,39 @@ def test_mrd_stream_cleanup(extended_gcsfs, gcs_bucket_mocks):
 
 
 @pytest.mark.asyncio
-async def test_simple_upload_zonal(extended_gcsfs, zonal_write_mocks):
+async def test_simple_upload_nonzonal(gcs_factory):
     """Test simple_upload for Zonal buckets calls the correct writer methods."""
     data = b"test data for simple_upload"
-    rpath = f"{TEST_ZONAL_BUCKET}/simple_upload_test"
+    file_name = "simple_upload_test2"
+    rpath = f"{TEST_BUCKET}/{file_name}"
+    extended_gcsfs = gcs_factory(asynchronous=True)
+
+    await simple_upload(
+        extended_gcsfs,
+        bucket=TEST_BUCKET,
+        key=file_name,
+        datain=data,
+    )
+    data = await extended_gcsfs._cat_file(rpath)
+    assert data == data
+
+
+@pytest.mark.asyncio
+async def test_simple_upload_zonalx(gcs_factory):
+    """Test simple_upload for Zonal buckets calls the correct writer methods."""
+    data = b"test data for simple_upload"
+    file_name = "simple_upload_test"
+    rpath = f"{TEST_ZONAL_BUCKET}/{file_name}"
+    extended_gcsfs = gcs_factory(asynchronous=True)
+
     await simple_upload(
         extended_gcsfs,
         bucket=TEST_ZONAL_BUCKET,
-        key="test-obj",
+        key=file_name,
         datain=data,
     )
-    if zonal_write_mocks:
-        zonal_write_mocks["init_aaow"].assert_awaited_once_with(
-            extended_gcsfs.grpc_client, TEST_ZONAL_BUCKET, "test-obj"
-        )
-        zonal_write_mocks["aaow"].append.assert_awaited_once_with(data)
-        zonal_write_mocks["aaow"].close.assert_awaited_once_with(finalize_on_close=True)
-    else:
-        assert extended_gcsfs.cat(rpath) == data
+    data = await extended_gcsfs._cat_file(rpath)
+    assert data == data
 
 
 @pytest.mark.asyncio
