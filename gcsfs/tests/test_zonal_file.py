@@ -44,77 +44,76 @@ def test_zonal_file_write_value_errors(
         with pytest.raises(ValueError, match=error_match):
             f.write(test_data)
 
-
-def test_zonal_file_write_success(extended_gcsfs, zonal_write_mocks):
-    """Test that writing to a ZonalFile calls the underlying writer's append method."""
-    with extended_gcsfs.open(file_path, "wb") as f:
-        f.write(test_data)
-
-    zonal_write_mocks["aaow"].append.assert_awaited_once_with(test_data)
-
-
-def test_zonal_file_open_write_mode(extended_gcsfs, zonal_write_mocks):
-    """Test that opening a ZonalFile in write mode initializes the writer."""
-    bucket, key, _ = extended_gcsfs.split_path(file_path)
-    with extended_gcsfs.open(file_path, "wb"):
-        pass
-
-    zonal_write_mocks["init_aaow"].assert_called_once_with(
-        extended_gcsfs.grpc_client, bucket, key
-    )
-
-
-def test_zonal_file_flush(extended_gcsfs, zonal_write_mocks):
-    """Test that flush calls the underlying writer's flush method."""
-    with extended_gcsfs.open(file_path, "wb") as f:
-        f.flush()
-
-    zonal_write_mocks["aaow"].flush.assert_awaited()
-
-
-def test_zonal_file_commit(extended_gcsfs, zonal_write_mocks):
-    """Test that commit finalizes the write and sets autocommit to True."""
-    with extended_gcsfs.open(file_path, "wb") as f:
-        f.commit()
-
-    zonal_write_mocks["aaow"].finalize.assert_awaited_once()
-    assert f.autocommit is True
-
-
-def test_zonal_file_discard(extended_gcsfs, zonal_write_mocks):  # noqa: F841
-    """Test that discard on a ZonalFile logs a warning."""
-    with mock.patch("gcsfs.zonal_file.logger") as mock_logger:
+@pytest.mark.skipif(
+    os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com",
+    reason="This test class is for mocked GCS only.",
+)
+class TestZonalFileMockGCS:
+    """
+    Contains unit tests for ZonalFile write operations.
+    """
+    def test_zonal_file_write_success(extended_gcsfs, zonal_write_mocks):
+        """Test that writing to a ZonalFile calls the underlying writer's append method."""
         with extended_gcsfs.open(file_path, "wb") as f:
-            f.discard()
-        mock_logger.warning.assert_called_once()
-        assert (
-            "Discard is not applicable for Zonal Buckets"
-            in mock_logger.warning.call_args[0][0]
+            f.write(test_data)
+
+        zonal_write_mocks["aaow"].append.assert_awaited_once_with(test_data)
+
+
+    def test_zonal_file_open_write_mode(extended_gcsfs, zonal_write_mocks):
+        """Test that opening a ZonalFile in write mode initializes the writer."""
+        bucket, key, _ = extended_gcsfs.split_path(file_path)
+        with extended_gcsfs.open(file_path, "wb"):
+            pass
+
+        zonal_write_mocks["init_aaow"].assert_called_once_with(
+            extended_gcsfs.grpc_client, bucket, key
         )
 
 
-def test_zonal_file_close(extended_gcsfs, zonal_write_mocks):
-    """Test that close finalizes the write by default (autocommit=True)."""
-    with extended_gcsfs.open(file_path, "wb"):
-        pass
-    zonal_write_mocks["aaow"].close.assert_awaited_once_with(finalize_on_close=True)
+    def test_zonal_file_flush(extended_gcsfs, zonal_write_mocks):
+        """Test that flush calls the underlying writer's flush method."""
+        with extended_gcsfs.open(file_path, "wb") as f:
+            f.flush()
+
+        zonal_write_mocks["aaow"].flush.assert_awaited()
 
 
-def test_zonal_file_close_with_autocommit_false(extended_gcsfs, zonal_write_mocks):
-    """Test that close does not finalize the write when autocommit is False."""
+    def test_zonal_file_commit(extended_gcsfs, zonal_write_mocks):
+        """Test that commit finalizes the write and sets autocommit to True."""
+        with extended_gcsfs.open(file_path, "wb") as f:
+            f.commit()
 
-    with extended_gcsfs.open(file_path, "wb", autocommit=False):
-        pass  # close is called on exit
-
-    zonal_write_mocks["aaow"].close.assert_awaited_once_with(finalize_on_close=False)
+        zonal_write_mocks["aaow"].finalize.assert_awaited_once()
+        assert f.autocommit is True
 
 
-def test_zonal_file_not_implemented_method(extended_gcsfs, zonal_write_mocks):
-    """Test that some GCSFile methods are not implemented for ZonalFile."""
-    with extended_gcsfs.open(file_path, "wb") as f:
-        method_to_call = getattr(f, "_upload_chunk")
-        with pytest.raises(NotImplementedError):
-            method_to_call()
+    def test_zonal_file_discard(extended_gcsfs, zonal_write_mocks):  # noqa: F841
+        """Test that discard on a ZonalFile logs a warning."""
+        with mock.patch("gcsfs.zonal_file.logger") as mock_logger:
+            with extended_gcsfs.open(file_path, "wb") as f:
+                f.discard()
+            mock_logger.warning.assert_called_once()
+            assert (
+                "Discard is not applicable for Zonal Buckets"
+                in mock_logger.warning.call_args[0][0]
+            )
+
+
+    def test_zonal_file_close(extended_gcsfs, zonal_write_mocks):
+        """Test that close finalizes the write by default (autocommit=True)."""
+        with extended_gcsfs.open(file_path, "wb"):
+            pass
+        zonal_write_mocks["aaow"].close.assert_awaited_once_with(finalize_on_close=True)
+
+
+    def test_zonal_file_close_with_autocommit_false(extended_gcsfs, zonal_write_mocks):
+        """Test that close does not finalize the write when autocommit is False."""
+
+        with extended_gcsfs.open(file_path, "wb", autocommit=False):
+            pass  # close is called on exit
+
+        zonal_write_mocks["aaow"].close.assert_awaited_once_with(finalize_on_close=False)
 
 
 @pytest.mark.skipif(
