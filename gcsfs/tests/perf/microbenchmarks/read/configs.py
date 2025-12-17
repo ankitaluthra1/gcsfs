@@ -23,13 +23,12 @@ _base_read_benchmark_cases = [
 @with_threads
 @with_processes
 def _filter_and_decorate_benchmark_cases():
-    cases_to_run = _base_read_benchmark_cases
     if BENCHMARK_FILTER:
         filter_names = [name.strip().lower() for name in BENCHMARK_FILTER.split(",")]
-        cases_to_run = [
-            case for case in cases_to_run if case.name.lower() in filter_names
+        return [
+            case for case in _base_read_benchmark_cases if case.name.lower() in filter_names
         ]
-    return cases_to_run
+    return _base_read_benchmark_cases
 
 
 def get_read_benchmark_cases():
