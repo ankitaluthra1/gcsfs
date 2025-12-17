@@ -508,6 +508,59 @@ class TestExtendedGcsFileSystemMv:
                 any_order=True,
             )
 
+    @pytest.mark.skipif(
+        os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com",
+        reason=(
+            "Skipping on real GCS because info throws FileNotFoundError for empty directories on HNS buckets."
+        ),
+    )
+    def test_hns_empty_folder_rename_success(self, gcs_hns, gcs_hns_mocks):
+        """Test successful HNS rename of an empty folder."""
+        gcsfs = gcs_hns
+        path1 = f"{TEST_HNS_BUCKET}/empty_old_dir"
+        path2 = f"{TEST_HNS_BUCKET}/empty_new_dir"
+
+        with gcs_hns_mocks(BucketType.HIERARCHICAL, gcsfs) as mocks:
+            if mocks:
+                # Configure mocks for the sequence of calls
+                mocks["info"].side_effect = [
+                    {"type": "directory", "name": path1},  # _mv check
+                    FileNotFoundError(path1),  # exists(path1) after move
+                    {"type": "directory", "name": path2},  # exists(path2) after move
+                ]
+
+            # Simulate creating an empty directory by creating and then deleting a file inside a
+            # folder as mkdir is still not supported on HNS buckets.
+            placeholder_file = f"{path1}/placeholder.txt"
+            gcsfs.touch(placeholder_file)
+            gcsfs.rm(placeholder_file)
+
+            gcsfs.mv(path1, path2)
+
+            assert not gcsfs.exists(path1)
+            assert gcsfs.exists(path2)
+
+            if mocks:
+                mocks["async_lookup_bucket_type"].assert_called_once_with(
+                    TEST_HNS_BUCKET
+                )
+                expected_info_calls = [
+                    mock.call(path1),  # from _mv
+                    mock.call(path1),  # from exists(path1)
+                    mock.call(path2),  # from exists(path2)
+                ]
+                mocks["info"].assert_has_awaits(expected_info_calls)
+                mocks["control_client"].rename_folder.assert_called_once()
+                mocks["super_mv"].assert_not_called()
+                mocks["invalidate_cache"].assert_has_calls(
+                    [
+                        mock.call(path1),
+                        mock.call(path2),
+                        mock.call(gcsfs._parent(path1)),
+                        mock.call(gcsfs._parent(path2)),
+                    ]
+                )
+
     @pytest.mark.parametrize(
         "bucket_type, info_return, path1, path2, reason",
         [
