@@ -1,4 +1,3 @@
-import logging
 from fsspec import asyn
 from google.cloud.storage._experimental.asyncio.async_multi_range_downloader import (
     AsyncMultiRangeDownloader,
@@ -41,7 +40,6 @@ class ZonalFile(GCSFile):
         Overrides the default _fetch_range to implement the gRPC read path.
 
         """
-        logging.debug(f"Fetching range ({start}-{end}) from Zonal bucket")
         try:
             return self.gcsfs.cat_file(self.path, start=start, end=end, mrd=self.mrd)
         except RuntimeError as e:

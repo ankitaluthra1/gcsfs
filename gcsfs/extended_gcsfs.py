@@ -140,7 +140,6 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         """
         bucket, _, _ = self.split_path(path)
         bucket_type = self._sync_lookup_bucket_type(bucket)
-        logging.debug(f"Setting cache type to {cache_type} for {path}")
         return gcs_file_types[bucket_type](
             self,
             path,
