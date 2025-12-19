@@ -8,8 +8,8 @@ import pytest
 
 from gcsfs.tests.perf.microbenchmarks.conftest import (
     publish_benchmark_extra_info,
-    publish_resource_metrics,
     publish_multi_process_benchmark_extra_info,
+    publish_resource_metrics,
 )
 from gcsfs.tests.perf.microbenchmarks.read.configs import get_read_benchmark_cases
 from gcsfs.tests.settings import BENCHMARK_SKIP_TESTS
@@ -74,18 +74,21 @@ def test_read_single_threaded(benchmark, gcsfs_benchmark_read_write, monitor):
     publish_benchmark_extra_info(benchmark, params, BENCHMARK_GROUP)
     path = file_paths[0]
 
+    op = None
+    op_args = None
+    if params.pattern == "seq":
+        op = _read_op_seq
+        op_args = (gcs, path, params.chunk_size_bytes)
+    elif params.pattern == "rand":
+        offsets = list(range(0, params.file_size_bytes, params.chunk_size_bytes))
+        op = _random_read_worker
+        op_args = (gcs, path, params.chunk_size_bytes, offsets)
+
     with monitor() as m:
-        if params.pattern == "seq":
-            op = _read_op_seq
-            op_args = (gcs, path, params.chunk_size_bytes)
-            benchmark.pedantic(op, args=op_args, rounds=params.rounds)
-        elif params.pattern == "rand":
-            offsets = list(range(0, params.file_size_bytes, params.chunk_size_bytes))
-            op = _random_read_worker
-            op_args = (gcs, path, params.chunk_size_bytes, offsets)
-            benchmark.pedantic(op, args=op_args, rounds=params.rounds)
-    
+        benchmark.pedantic(op, rounds=params.rounds, args=op_args)
+
     publish_resource_metrics(benchmark, m)
+
 
 @pytest.mark.parametrize(
     "gcsfs_benchmark_read_write",
@@ -132,7 +135,7 @@ def test_read_multi_threaded(benchmark, gcsfs_benchmark_read_write, monitor):
 
     with monitor() as m:
         benchmark.pedantic(run_benchmark, rounds=params.rounds)
-    
+
     publish_resource_metrics(benchmark, m)
 
 
