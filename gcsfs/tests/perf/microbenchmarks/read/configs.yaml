@@ -1,0 +1,40 @@
+common:
+  bucket_types:
+    - "regional"
+    - "zonal"
+  file_sizes_mb:
+    - 1024 # 1GB
+  block_sizes_mb:
+    - 16
+  rounds: 10
+
+scenarios:
+  - name: "read_seq"
+    pattern: "seq"
+    threads: [1,4,16]
+    processes: [1]
+
+  - name: "read_seq_multi_process"
+    pattern: "seq"
+    threads: [1]
+    processes: [8]
+
+  - name: "read_seq_multi_process_multi_threaded"
+    pattern: "seq"
+    threads: [2]
+    processes: [4,8,16]
+
+  - name: "read_rand"
+    pattern: "rand"
+    threads: [1,4,16]
+    processes: [1]
+
+  - name: "read_rand_multi_process"
+    pattern: "rand"
+    threads: [1]
+    processes: [8]
+
+  - name: "read_rand_multi_process_multi_threaded"
+    pattern: "rand"
+    threads: [2]
+    processes: [4,8,16]

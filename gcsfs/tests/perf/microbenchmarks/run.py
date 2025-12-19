@@ -91,10 +91,6 @@ def _run_benchmarks(results_dir, args):
             ]
         )
 
-    if args.name:
-        pytest_command.append("-k")
-        pytest_command.append(args.name)
-
     logging.info(f"Executing command: {' '.join(pytest_command)}")
 
     try:
@@ -222,7 +218,7 @@ def _create_table_row(row):
         f"{float(row.get('block_size', 0)) / MB:.2f}",
         f"{float(row.get('min', 0)):.4f}",
         f"{float(row.get('mean', 0)):.4f}",
-        float(row.get('max_throughput_mb_s', 0)),
+        float(row.get("max_throughput_mb_s", 0)),
         f"{float(row.get('cpu_max_global', 0)):.2f}",
         f"{float(row.get('mem_max', 0)) / MB:.2f}",
     ]
@@ -288,9 +284,6 @@ def main():
         "--config",
         nargs="+",
         help="The name(s) of the benchmark configuration(s) to run(e.g., --config read_seq_1thread,read_rand_1thread).",
-    )
-    parser.add_argument(
-        "--name", help="A keyword to filter tests by name (passed to pytest -k)."
     )
     parser.add_argument(
         "--regional-bucket",
