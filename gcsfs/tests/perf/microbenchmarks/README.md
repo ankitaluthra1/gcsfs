@@ -8,10 +8,11 @@ This document describes the microbenchmark suite for `gcsfs`. These benchmarks a
 
 Before running the benchmarks, ensure you have installed the project's dependencies for performance testing. This can be done by running the following command from the root of the repository:
 ```bash
-pip install -e ".[test,perf]"
+pip install -r gcsfs/tests/perf/microbenchmarks/requirements.txt
 ```
 
-This will install `pytest`, `pytest-benchmark`, and other necessary dependencies. For more information on `pytest-benchmark`, you can refer to its official documentation. [1]
+This will install `pytest`, `pytest-benchmark`, and other necessary dependencies.
+For more information on `pytest-benchmark`, you can refer to its official documentation. [1]
 
 ## Read Benchmarks
 
