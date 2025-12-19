@@ -1,22 +1,24 @@
-import psutil
 import threading
 import time
+
+import psutil
+
 
 class ResourceMonitor:
     def __init__(self):
         self.interval = 1.0
 
-        self.vcpus = psutil.cpu_count() or 1         
+        self.vcpus = psutil.cpu_count() or 1
         self.max_cpu = 0.0
         self.max_mem = 0.0
-        
+
         # Network and Time tracking
         self.start_time = 0.0
         self.duration = 0.0
         self.start_net = None
         self.net_sent_mb = 0.0
         self.net_recv_mb = 0.0
-        
+
         self._stop_event = threading.Event()
         self._thread = None
 
@@ -30,12 +32,16 @@ class ResourceMonitor:
         self.stop()
         self.duration = time.perf_counter() - self.start_time
         end_net = psutil.net_io_counters()
-        
-        self.net_sent_mb = (end_net.bytes_sent - self.start_net.bytes_sent) / (1024 * 1024)
-        self.net_recv_mb = (end_net.bytes_recv - self.start_net.bytes_recv) / (1024 * 1024)
+
+        self.net_sent_mb = (end_net.bytes_sent - self.start_net.bytes_sent) / (
+            1024 * 1024
+        )
+        self.net_recv_mb = (end_net.bytes_recv - self.start_net.bytes_recv) / (
+            1024 * 1024
+        )
 
     def _monitor(self):
-        psutil.cpu_percent(interval=None) 
+        psutil.cpu_percent(interval=None)
         current_process = psutil.Process()
         while not self._stop_event.is_set():
             try:
@@ -48,19 +54,19 @@ class ResourceMonitor:
                         current_mem += child.memory_info().rss
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         continue
-                
+
                 # Normalize CPU by number of vcpus
                 global_cpu = total_cpu / self.vcpus
-                
+
                 mem = current_mem
-                
+
                 if global_cpu > self.max_cpu:
                     self.max_cpu = global_cpu
                 if mem > self.max_mem:
                     self.max_mem = mem
             except psutil.NoSuchProcess:
                 pass
-            
+
             time.sleep(self.interval)
 
     def start(self):
@@ -75,5 +81,6 @@ class ResourceMonitor:
     @property
     def throughput_mb_s(self):
         """Calculates combined network throughput."""
-        if self.duration <= 0: return 0.0
+        if self.duration <= 0:
+            return 0.0
         return (self.net_sent_mb + self.net_recv_mb) / self.duration
