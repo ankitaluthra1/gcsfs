@@ -97,15 +97,17 @@ def _run_benchmarks(results_dir, args):
         env = os.environ.copy()
         subprocess.run(pytest_command, check=True, env=env, text=True)
         logging.info(f"Benchmark run completed. Results saved to {json_output_path}")
-        return json_output_path
     except subprocess.CalledProcessError as e:
-        logging.error(f"Pytest execution failed: {e}")
-        sys.exit(1)
+        logging.error(
+            f"Benchmark run completed with error: {e}, results saved to {json_output_path}"
+        )
     except FileNotFoundError:
         logging.error(
             "pytest not found. Please ensure it is installed in your environment."
         )
         sys.exit(1)
+
+    return json_output_path
 
 
 def _process_benchmark_result(bench, headers, extra_info_headers, stats_headers):
