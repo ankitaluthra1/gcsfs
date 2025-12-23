@@ -4,30 +4,27 @@ common:
     - "zonal"
   file_sizes_mb:
     - 1024 # 1GB
-    - 10240 # 10GB
   block_sizes_mb:
-    - 16
     - 64
-    - 100
   rounds: 10
 
 scenarios:
   - name: "read_seq"
     pattern: "seq"
-    threads: [1,4,8,16]
+    threads: [1,4,8]
     processes: [1]
 
   - name: "read_seq_multi_process"
     pattern: "seq"
-    threads: [1,2,4]
-    processes: [4,8,16]
+    threads: [1,2]
+    processes: [16]
 
   - name: "read_rand"
     pattern: "rand"
-    threads: [1,4,8,16]
+    threads: [1,4,8]
     processes: [1]
 
   - name: "read_rand_multi_process"
     pattern: "rand"
-    threads: [1,2,4]
-    processes: [4,8,16]
+    threads: [1,2]
+    processes: [16]
