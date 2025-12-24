@@ -19,6 +19,7 @@ try:
 except ImportError:
     benchmark_plugin_installed = False
 
+
 def _write_file(gcs, path, file_size, chunk_size):
     chunks_to_write = file_size // chunk_size
     remainder = file_size % chunk_size
@@ -27,7 +28,6 @@ def _write_file(gcs, path, file_size, chunk_size):
             f.write(os.urandom(chunk_size))
         if remainder > 0:
             f.write(os.urandom(remainder))
-
 
 
 def _prepare_files(gcs, file_paths, file_size):
