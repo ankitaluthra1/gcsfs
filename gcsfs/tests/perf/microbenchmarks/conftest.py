@@ -5,7 +5,6 @@ import statistics
 import time
 import uuid
 from typing import Any, List
-import sys
 
 import pytest
 from resource_monitor import ResourceMonitor
@@ -37,15 +36,6 @@ def _prepare_files(gcs, file_paths, file_size):
     ctx = multiprocessing.get_context("spawn")
     with ctx.Pool(16) as pool:
         pool.starmap(_write_file, args)
-
-
-@pytest.fixture
-def monitor():
-    """
-    Provides the ResourceMonitor class.
-    Usage: with monitor() as m: ...
-    """
-    return ResourceMonitor
 
 
 @pytest.fixture
