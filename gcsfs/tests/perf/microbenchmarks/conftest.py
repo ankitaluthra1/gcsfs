@@ -49,6 +49,15 @@ def monitor():
 
 
 @pytest.fixture
+def monitor():
+    """
+    Provides the ResourceMonitor class.
+    Usage: with monitor() as m: ...
+    """
+    return ResourceMonitor
+
+
+@pytest.fixture
 def gcsfs_benchmark_read_write(extended_gcs_factory, request):
     """
     A fixture that creates temporary files for a benchmark run and cleans
