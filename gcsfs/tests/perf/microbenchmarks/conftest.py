@@ -72,7 +72,9 @@ def gcsfs_benchmark_read_write(extended_gcs_factory, request):
     _prepare_files(gcs, file_paths, params.file_size_bytes)
 
     duration_ms = (time.perf_counter() - start_time) * 1000
-    logging.info(f"Benchmark '{params.name}' setup created {params.num_files} files in {duration_ms:.2f} ms.")
+    logging.info(
+        f"Benchmark '{params.name}' setup created {params.num_files} files in {duration_ms:.2f} ms."
+    )
 
     yield gcs, file_paths, params
 
