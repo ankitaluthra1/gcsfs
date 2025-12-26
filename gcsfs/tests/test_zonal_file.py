@@ -280,8 +280,10 @@ def test_zonal_file_append_multiple(extended_gcsfs, zonal_write_mocks):
     data2 = b"appended data."
     data3 = b"more appended data."
 
-    if extended_gcsfs.exists(append_file_path):
+    try:
         extended_gcsfs.rm(append_file_path)
+    except FileNotFoundError:
+        pass
 
     with extended_gcsfs.open(append_file_path, "wb") as f:
         f.write(data1)
@@ -297,6 +299,11 @@ def test_zonal_file_append_multiple(extended_gcsfs, zonal_write_mocks):
 def test_zonal_file_append_to_empty(extended_gcsfs, zonal_write_mocks):
     """Tests appending to an explicitly created empty file."""
     path = f"{TEST_ZONAL_BUCKET}/zonal-append-empty-test"
+
+    try:
+        extended_gcsfs.rm(path)
+    except FileNotFoundError:
+        pass
 
     if not zonal_write_mocks:
         with extended_gcsfs.open(path, "wb") as f:
