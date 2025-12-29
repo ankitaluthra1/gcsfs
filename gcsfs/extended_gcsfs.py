@@ -276,7 +276,14 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
     async def _is_bucket_hns_enabled(self, bucket):
         """Checks if a bucket has Hierarchical Namespace enabled."""
-        bucket_type = await self._lookup_bucket_type(bucket)
+        try:
+            bucket_type = await self._lookup_bucket_type(bucket)
+        except Exception:
+            logger.warning(
+                f"Could not determine if bucket '{bucket}' is HNS-enabled, falling back to default non-HNS"
+            )
+            return False
+
         return bucket_type in [BucketType.ZONAL_HIERARCHICAL, BucketType.HIERARCHICAL]
 
     def _update_dircache_after_rename(self, path1, path2):
@@ -408,6 +415,108 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         )
 
     mv = asyn.sync_wrapper(_mv)
+
+    async def _rmdir(self, path):
+        """
+        Deletes an empty directory. Overrides the parent `_rmdir` to delete
+        empty directories in HNS-enabled buckets.
+        """
+        path = self._strip_protocol(path)
+        bucket, key, _ = self.split_path(path)
+
+        # The parent _rmdir is only for deleting buckets. If key is empty,
+        # given path is a bucket, we can fall back.
+        if not key:
+            return await super()._rmdir(path)
+
+        is_hns = False
+        try:
+            is_hns = await self._is_bucket_hns_enabled(bucket)
+        except Exception as e:
+            logger.warning(
+                f"Could not determine if bucket '{bucket}' is HNS-enabled, falling back to default rmdir: {e}"
+            )
+
+        if not is_hns:
+            return await super()._rmdir(path)
+
+        try:
+            logger.info(f"Using HNS-aware rmdir for '{path}'.")
+            folder_name = f"projects/_/buckets/{bucket}/folders/{key.rstrip('/')}"
+            request = storage_control_v2.DeleteFolderRequest(name=folder_name)
+
+            logger.debug(f"delete_folder request: {request}")
+            await self._storage_control_client.delete_folder(request=request)
+
+            # Remove the directory from the cache and from its parent's listing.
+            self.dircache.pop(path, None)
+            parent = self._parent(path)
+            if parent in self.dircache:
+                # Remove the deleted directory entry from the parent's listing.
+                for i, entry in enumerate(self.dircache[parent]):
+                    if entry.get("name") == path:
+                        self.dircache[parent].pop(i)
+                        break
+            return
+        except api_exceptions.NotFound as e:
+            # This can happen if the directory does not exist, or if the path
+            # points to a file object instead of a directory.
+            raise FileNotFoundError(f"rmdir failed for path: {path}: {e}") from e
+        except api_exceptions.FailedPrecondition as e:
+            # This can happen if the directory is not empty.
+            raise OSError(
+                f"Pre condition failed for rmdir for path: {path}: {e}"
+            ) from e
+        except Exception as e:
+            logger.error(f"HNS rmdir: Failed to delete folder '{path}': {e}")
+            raise
+
+    rmdir = asyn.sync_wrapper(_rmdir)
+
+    async def _get_directory_info(self, path, bucket, key, generation):
+        """
+        Override to use Storage Control API's get_folder for HNS buckets.
+        For HNS, we avoid calling _ls (_list_objects) entirely.
+        """
+        is_hns = await self._is_bucket_hns_enabled(bucket)
+
+        # If bucket is HNS, use get folder metadata api to determine a directory
+        if is_hns:
+            try:
+                # folder_id is the path relative to the bucket
+                folder_id = key.rstrip("/")
+                folder_resource_name = (
+                    f"projects/_/buckets/{bucket}/folders/{folder_id}"
+                )
+
+                request = storage_control_v2.GetFolderRequest(name=folder_resource_name)
+
+                # Verify existence using get_folder API
+                response = await self._storage_control_client.get_folder(
+                    request=request
+                )
+
+                # If successful, return directory metadata
+                return {
+                    "bucket": bucket,
+                    "name": path,
+                    "size": 0,
+                    "storageClass": "DIRECTORY",
+                    "type": "directory",
+                    "ctime": response.create_time,
+                    "mtime": response.update_time,
+                    "metageneration": response.metageneration,
+                }
+            except api_exceptions.NotFound:
+                # If get_folder fails, the folder does not exist.
+                raise FileNotFoundError(path)
+            except Exception as e:
+                # Log unexpected errors
+                logger.error(f"Error fetching folder metadata for {path}: {e}")
+                raise e
+
+        # Fallback to standard GCS behavior for non-HNS buckets
+        return await super()._get_directory_info(path, bucket, key, generation)
 
 
 async def upload_chunk(fs, location, data, offset, size, content_type):
