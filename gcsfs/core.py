@@ -1782,6 +1782,283 @@ class GCSFileSystem(asyn.AsyncFileSystem):
 GoogleCredentials.load_tokens()
 
 
+import urllib.parse
+from collections import deque
+from fsspec.caching import BaseCache, register_cache
+from fsspec.asyn import sync
+
+logger = logging.getLogger("gcsfs")
+_MIN_CHUNK = 20 * 1024 * 1024
+_MIN_CHUNK_CONCURRENT = 5 * 1024 * 1024
+_STREAM_PACKET_SIZE = 5 * 1024 * 1024
+
+class OptimizedConcurrentCache(BaseCache):
+    """This is experimental new gcs-prefetch default caching mechanism"""
+    name = "gcsdefault"
+
+    def __init__(self, blocksize, fetcher, size, max_concurrency=4, **kwargs):
+        super().__init__(blocksize, fetcher, size)
+        
+        if hasattr(fetcher, "__self__"):
+            self.gcs_file = fetcher.__self__
+            self.fs = self.gcs_file.fs
+            self.path = self.gcs_file.path   
+            self.bucket, self.key, _ = self.fs.split_path(self.path)
+        else:
+            raise ValueError("OptimizedConcurrentCache requires a bound fetcher method")
+
+        self.max_concurrency = max_concurrency
+        
+        self.current_read_offset = 0
+        self.read_sequence = 0
+        self.learned_block_size = _MIN_CHUNK
+        self.read_history = deque(maxlen=10)
+        
+        self.buffer_chunks = deque() 
+        self.buffer_size = 0
+
+        encoded_obj = urllib.parse.quote(self.key, safe='')
+        self.url = f"{self.fs._location}/storage/v1/b/{self.bucket}/o/{encoded_obj}"
+
+        self._concurrency_initialized = False
+        self.task_queue = None       
+        self.active_downloads = {}   
+        self.workers = []
+        self._prefetch_task = None
+        self._prefetcher_loop_running = False
+
+    def close(self):
+        if self._concurrency_initialized:
+            try:
+                if self.fs.loop and self.fs.loop.is_running():
+                    sync(self.fs.loop, self._cancel_prefetcher)
+            except Exception as e:
+                logger.debug(f"Error closing cache workers: {e}")
+
+    def _fetch(self, start, end):
+        if start >= self.size or start >= end:
+            return b""
+        return sync(self.fs.loop, self._async_fetch_range, start, end)
+
+    async def _ensure_concurrency(self):
+        if self._concurrency_initialized:
+            return
+
+        self.task_queue = asyncio.Queue(maxsize=self.max_concurrency) 
+        self.active_downloads = {}
+        
+        self.workers = [
+            asyncio.create_task(self._worker_loop(i)) 
+            for i in range(self.max_concurrency)
+        ]
+        self._scheduler_condition = asyncio.Condition()
+        self._concurrency_initialized = True
+
+    async def _async_fetch_range(self, start, end):
+        await self._ensure_concurrency()
+
+        if start != self.current_read_offset:
+            await self._cancel_prefetcher()
+            self.current_read_offset = start
+            self.read_sequence = 0 
+
+        size_needed = end - start
+        self._update_learning(size_needed)
+
+        if not self._prefetcher_loop_running:
+            await self._start_prefetcher(self.current_read_offset + self.buffer_size)
+
+        out_data = []
+        bytes_collected = 0
+
+        while self.buffer_chunks and bytes_collected < size_needed:
+            chunk = self.buffer_chunks[0]
+            chunk_len = len(chunk)
+            remaining_need = size_needed - bytes_collected
+
+            if chunk_len <= remaining_need:
+                out_data.append(self.buffer_chunks.popleft())
+                self.buffer_size -= chunk_len
+                bytes_collected += chunk_len
+                self.current_read_offset += chunk_len
+            else:
+                part = chunk[:remaining_need]
+                out_data.append(part)
+                self.buffer_chunks[0] = chunk[remaining_need:]
+                self.buffer_size -= remaining_need
+                bytes_collected += remaining_need
+                self.current_read_offset += remaining_need
+
+        if bytes_collected >= size_needed:
+            return b"".join(out_data)
+
+        needed = size_needed - bytes_collected
+        
+        while needed > 0:
+            expected_seq = self.read_sequence
+            
+            async with self._scheduler_condition:
+                await self._scheduler_condition.wait_for(
+                    lambda: expected_seq in self.active_downloads or 
+                            (self._prefetch_task and self._prefetch_task.done())
+                )
+
+            if expected_seq not in self.active_downloads:
+                if self._prefetch_task and self._prefetch_task.done():
+                    if self._prefetch_task.cancelled():
+                        raise asyncio.CancelledError("Prefetcher cancelled")
+                    if self._prefetch_task.exception():
+                        raise self._prefetch_task.exception()
+                break
+
+            if expected_seq not in self.active_downloads:
+                break 
+
+            queue = self.active_downloads[expected_seq]
+            data = await queue.get()
+
+            if isinstance(data, Exception):
+                await self._cancel_prefetcher()
+                raise data
+            
+            if data is None:
+                del self.active_downloads[expected_seq]
+                self.read_sequence += 1
+                continue
+
+            len_data = len(data)
+            
+            if len_data > needed:
+                out_data.append(data[:needed])
+                remainder = data[needed:]
+                self.buffer_chunks.append(remainder)
+                self.buffer_size += len(remainder)
+                self.current_read_offset += needed
+                needed = 0
+            else:
+                out_data.append(data)
+                self.current_read_offset += len_data
+                needed -= len_data
+
+        return b"".join(out_data)
+
+    async def _start_prefetcher(self, start_offset):
+        if self._prefetcher_loop_running:
+            return
+        self._prefetcher_loop_running = True
+        self._prefetch_task = asyncio.create_task(self._prefetcher_loop(start_offset))
+
+    async def _cancel_prefetcher(self):
+        self._prefetcher_loop_running = False        
+        if self._prefetch_task:
+            self._prefetch_task.cancel()
+            try:
+                await self._prefetch_task
+            except asyncio.CancelledError:
+                pass
+            self._prefetch_task = None
+
+        if self.workers:
+            for w in self.workers: 
+                w.cancel()
+            
+            await asyncio.gather(*self.workers, return_exceptions=True)
+            self.workers = []
+            self._concurrency_initialized = False 
+
+        self.active_downloads = {}
+        if self.task_queue:
+            while not self.task_queue.empty():
+                try: self.task_queue.get_nowait()
+                except asyncio.QueueEmpty: break
+        
+        self.buffer_chunks.clear()
+        self.buffer_size = 0
+        self.read_sequence = 0
+
+    async def _prefetcher_loop(self, start_offset):
+        offset = start_offset
+        current_seq_id = self.read_sequence 
+
+        try:
+            while offset < self.size:
+                target_total = self.learned_block_size
+                partition_size = max(_MIN_CHUNK, target_total // self.max_concurrency)
+                fetch_len = min(partition_size, self.size - offset)
+                
+                if fetch_len <= 0: break
+
+                result_q = asyncio.Queue()
+                async with self._scheduler_condition:
+                    self.active_downloads[current_seq_id] = result_q
+                    self._scheduler_condition.notify_all()
+
+                task_payload = (offset, offset + fetch_len, result_q)
+                await self.task_queue.put(task_payload)
+                
+                offset += fetch_len
+                current_seq_id += 1
+        except asyncio.CancelledError:
+            raise
+
+    async def _worker_loop(self, worker_id):
+        try:
+            while True:
+                task = await self.task_queue.get()
+                start, end, result_q = task
+                
+                try:
+                    await self._fetch_worker(start, end, result_q)
+                except asyncio.CancelledError:
+                    raise 
+                except Exception as e:
+                    logger.error(f"Worker {worker_id} error: {e}")
+                    await result_q.put(e)
+                finally:
+                    self.task_queue.task_done()
+                    
+        except asyncio.CancelledError:
+            raise 
+
+    async def _fetch_worker(self, start, end, result_q):
+        try:
+            data = await self.fs._cat_file(self.path, start=start, end=end)
+            await result_q.put(data)
+            await result_q.put(None)
+        except RuntimeError as e:
+            if "not satisfiable" in str(e):
+                return b""
+            raise
+
+        # Better Approach, Keeps Memory Low by Streaming it in packets.
+
+        # try:
+        #     headers = {}
+        #     self.gcs_file.gcsfs.credentials.apply(headers)
+        #     headers["Range"] = f"bytes={start}-{end-1}"
+            
+        #     async with self.fs.session.get(self.url, headers=headers, params={"alt": "media"}) as resp:
+        #         resp.raise_for_status()
+                
+        #         async for chunk in resp.content.iter_chunked(_STREAM_PACKET_SIZE):
+        #             await result_q.put(chunk)
+                
+        #         await result_q.put(None) 
+                
+        # except asyncio.CancelledError:
+        #     raise
+        # except Exception as e:
+        #     await result_q.put(e)
+
+    def _update_learning(self, size):
+        if size <= 0: return
+        self.read_history.append(size)
+        sorted_history = sorted(self.read_history)
+        observed_median = sorted_history[len(sorted_history) // 2]
+        self.learned_block_size = max(_MIN_CHUNK, observed_median)
+
+register_cache(OptimizedConcurrentCache)
+
 class GCSFile(fsspec.spec.AbstractBufferedFile):
     def __init__(
         self,
@@ -2051,6 +2328,10 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
                 return b""
             raise
 
+    def close(self):
+        if hasattr(self, "cache") and isinstance(self.cache, OptimizedConcurrentCache):
+            self.cache.close()
+        super().close()
 
 def _convert_fixed_key_metadata(metadata, *, from_google=False):
     """
