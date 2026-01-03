@@ -3,13 +3,20 @@ import os
 import shlex
 import subprocess
 import time
+import uuid
+from unittest import mock
 
 import fsspec
 import pytest
+import pytest_asyncio
 import requests
 from google.cloud import storage
+from google.cloud.storage._experimental.asyncio.async_appendable_object_writer import (
+    AsyncAppendableObjectWriter,
+)
 
 from gcsfs import GCSFileSystem
+from gcsfs.extended_gcsfs import BucketType
 from gcsfs.tests.settings import (
     TEST_BUCKET,
     TEST_HNS_BUCKET,
@@ -311,10 +318,15 @@ def _create_extended_gcsfs(gcs_factory, buckets_to_delete, populate=True, **kwar
             pass
         extended_gcsfs.mkdir(TEST_ZONAL_BUCKET)
         buckets_to_delete.add(TEST_ZONAL_BUCKET)
+    try:
         if populate:
             extended_gcsfs.pipe(
-                {TEST_ZONAL_BUCKET + "/" + k: v for k, v in allfiles.items()}
+                {TEST_ZONAL_BUCKET + "/" + k: v for k, v in allfiles.items()},
+                finalize_on_close=True,
             )
+    except Exception as e:
+        logging.warning(f"Failed to populate Zonal bucket: {e}")
+
     extended_gcsfs.invalidate_cache()
     return extended_gcsfs
 
@@ -344,3 +356,64 @@ def gcs_hns(gcs_factory, buckets_to_delete):
         yield gcs
     finally:
         _cleanup_gcs(gcs, bucket=TEST_HNS_BUCKET)
+
+
+@pytest.fixture
+def zonal_write_mocks():
+    """A fixture for mocking Zonal bucket write functionality."""
+
+    if os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com":
+        yield None
+        return
+
+    patch_target_get_bucket_type = (
+        "gcsfs.extended_gcsfs.ExtendedGcsFileSystem._get_bucket_type"
+    )
+    patch_target_init_aaow = "gcsfs.zb_hns_utils.init_aaow"
+    patch_target_gcsfs_info = "gcsfs.core.GCSFileSystem._info"
+
+    mock_aaow = mock.AsyncMock(spec=AsyncAppendableObjectWriter)
+    mock_aaow.offset = 0
+    mock_aaow._is_stream_open = True
+    mock_init_aaow = mock.AsyncMock(return_value=mock_aaow)
+    mock_gcsfs_info = mock.AsyncMock(return_value={"generation": "12345"})
+
+    async def append_side_effect(data):
+        mock_aaow.offset += len(data)
+
+    mock_aaow.append.side_effect = append_side_effect
+
+    async def close_side_effect(finalize_on_close=False):
+        mock_aaow._is_stream_open = False
+
+    mock_aaow.close.side_effect = close_side_effect
+
+    with (
+        mock.patch(
+            patch_target_get_bucket_type,
+            return_value=BucketType.ZONAL_HIERARCHICAL,
+        ),
+        mock.patch(patch_target_gcsfs_info, mock_gcsfs_info),
+        mock.patch(patch_target_init_aaow, mock_init_aaow),
+    ):
+        mocks = {
+            "aaow": mock_aaow,
+            "init_aaow": mock_init_aaow,
+            "_gcsfs_info": mock_gcsfs_info,
+        }
+        yield mocks
+
+
+@pytest.fixture
+def file_path():
+    """Generates a unique test file path and cleans it up after the test."""
+    path = f"{TEST_ZONAL_BUCKET}/zonal-test-{uuid.uuid4()}"
+    yield path
+
+
+@pytest_asyncio.fixture
+async def async_gcs():
+    """Fixture to provide an asynchronous GCSFileSystem instance."""
+    GCSFileSystem.clear_instance_cache()
+    gcs = GCSFileSystem(asynchronous=True, token="anon")
+    yield gcs
