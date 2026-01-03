@@ -414,5 +414,6 @@ def file_path():
 @pytest_asyncio.fixture
 async def async_gcs():
     """Fixture to provide an asynchronous GCSFileSystem instance."""
-    gcs = GCSFileSystem(asynchronous=True, skip_instance_cache=True)
+    GCSFileSystem.clear_instance_cache()
+    gcs = GCSFileSystem(asynchronous=True, token="anon")
     yield gcs
