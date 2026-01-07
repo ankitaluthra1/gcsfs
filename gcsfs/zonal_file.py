@@ -46,6 +46,37 @@ class ZonalFile(GCSFile):
         ensure the write is finalized, `.commit()` must be called explicitly or
         `finalize_on_close` must be set to `True` when opening the file.
         """
+        bucket, key, generation = gcsfs._split_path(path)
+        if not key:
+            raise OSError("Attempt to open a bucket")
+        self.mrd = None
+        self.finalize_on_close = finalize_on_close
+        self.finalized = False
+        self.mode = mode
+        self.gcsfs = gcsfs
+        object_size = None
+        if "r" in self.mode:
+            self.mrd = asyn.sync(
+                self.gcsfs.loop, self._init_mrd, bucket, key, generation
+            )
+            object_size = self.mrd.persisted_size
+            if object_size is None:
+                logger.warning(
+                    "AsyncMultiRangeDownloader (MRD) exists but has no 'persisted_size'. "
+                    "This may result in incorrect behavior for unfinalized objects."
+                )
+        elif "w" or "a" in self.mode:
+            self.aaow = asyn.sync(
+                self.gcsfs.loop,
+                self._init_aaow,
+                bucket,
+                key,
+                generation,
+            )
+        else:
+            raise NotImplementedError(
+                "Only read, write and append operations are currently supported for Zonal buckets."
+            )
         super().__init__(
             gcsfs,
             path,
@@ -64,32 +95,16 @@ class ZonalFile(GCSFile):
             kms_key_name,
             # Zonal buckets support append; this prevents GCSFile from forcing 'w' mode
             supports_append="a" in mode,
+            # pass persisted_size here so that Cache is initialized with correct object size
+            size=object_size,
             **kwargs,
         )
-        self.mrd = None
-        self.finalize_on_close = finalize_on_close
-        self.finalized = False
-        if "r" in self.mode:
-            self.mrd = asyn.sync(
-                self.gcsfs.loop, self._init_mrd, self.bucket, self.key, self.generation
-            )
-        elif "w" or "a" in self.mode:
-            self.aaow = asyn.sync(
-                self.gcsfs.loop,
-                self._init_aaow,
-                self.bucket,
-                self.key,
-                self.generation,
-            )
-        else:
-            raise NotImplementedError(
-                "Only read, write and append operations are currently supported for Zonal buckets."
-            )
 
     async def _init_mrd(self, bucket_name, object_name, generation=None):
         """
         Initializes the AsyncMultiRangeDownloader.
         """
+        await self.gcsfs._get_grpc_client()
         return await AsyncMultiRangeDownloader.create_mrd(
             self.gcsfs.grpc_client, bucket_name, object_name, generation
         )
@@ -101,11 +116,13 @@ class ZonalFile(GCSFile):
         # generation is needed while creating aaow to append to existing objects
         if "a" in self.mode and generation is None:
             try:
-                info = await self.gcsfs._info(self.path)
+                # self.path might not be set yet, so reconstruct full path
+                info = await self.gcsfs._info(f"{bucket_name}/{object_name}")
                 generation = info.get("generation")
             except FileNotFoundError:
                 # if file doesn't exist, we don't need generation
                 pass
+        await self.gcsfs._get_grpc_client()
         return await zb_hns_utils.init_aaow(
             self.gcsfs.grpc_client, bucket_name, object_name, generation
         )
@@ -149,6 +166,7 @@ class ZonalFile(GCSFile):
             raise ValueError("Force flush cannot be called more than once")
         if self.finalized:
             logger.warning("File is already finalized. Ignoring flush call.")
+            return
         if force:
             self.forced = True
 
@@ -183,7 +201,6 @@ class ZonalFile(GCSFile):
         """Initiates the upload for Zonal buckets using gRPC."""
         from gcsfs.extended_gcsfs import initiate_upload
 
-        # Warning: This method is not yet implemented and will raise a NotImplementedError.
         self.location = asyn.sync(
             self.gcsfs.loop,
             initiate_upload,
@@ -202,7 +219,6 @@ class ZonalFile(GCSFile):
         """Performs a simple upload for Zonal buckets using gRPC."""
         from gcsfs.extended_gcsfs import simple_upload
 
-        # Warning: This method is not yet implemented and will raise a NotImplementedError.
         self.buffer.seek(0)
         data = self.buffer.read()
         asyn.sync(
@@ -219,6 +235,7 @@ class ZonalFile(GCSFile):
             mode="create" if "x" in self.mode else "overwrite",
             kms_key_name=self.kms_key_name,
             timeout=self.timeout,
+            finalize_on_close=self.finalize_on_close,
         )
 
     def _upload_chunk(self, final=False):
@@ -237,7 +254,8 @@ class ZonalFile(GCSFile):
         super().close()
         if hasattr(self, "mrd") and self.mrd:
             asyn.sync(self.gcsfs.loop, self.mrd.close)
-        if hasattr(self, "aaow") and self.aaow:
+        # Don't try to close aaow if object is already finalized
+        if not self.finalized and hasattr(self, "aaow") and self.aaow:
             asyn.sync(
                 self.gcsfs.loop,
                 self.aaow.close,
