@@ -4,6 +4,7 @@ from enum import Enum
 from functools import partial
 
 from fsspec import asyn
+from fsspec.callbacks import NoOpCallback
 from google.api_core import exceptions as api_exceptions
 from google.api_core import gapic_v1
 from google.api_core.client_info import ClientInfo
@@ -187,7 +188,9 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         )
 
     # Replacement method for _process_limits to support new params (offset and length) for MRD.
-    async def _process_limits_to_offset_and_length(self, path, start, end):
+    async def _process_limits_to_offset_and_length(
+        self, path, start, end, file_size=None
+    ):
         """
         Calculates the read offset and length from start and end parameters.
 
@@ -195,6 +198,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             path (str): The path to the file.
             start (int | None): The starting byte position.
             end (int | None): The ending byte position.
+            file_size (int | None): The total size of the file. If None, it will be fetched via _info().
 
         Returns:
             tuple: A tuple containing (offset, length).
@@ -202,7 +206,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         Raises:
             ValueError: If the calculated range is invalid.
         """
-        size = None
+        size = file_size
 
         if start is None:
             offset = 0
@@ -277,8 +281,15 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 )
                 mrd_created = True
 
+            file_size = mrd.persisted_size
+            if file_size is None:
+                logger.warning(
+                    "AsyncMultiRangeDownloader (MRD) exists but has no 'persisted_size'. "
+                    "Falling back to _info() to get the file size. "
+                    "This may result in incorrect behavior for unfinalized objects."
+                )
             offset, length = await self._process_limits_to_offset_and_length(
-                path, start, end
+                path, start, end, file_size
             )
 
             return await zb_hns_utils.download_range(
@@ -293,9 +304,10 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         """Checks if a bucket has Hierarchical Namespace enabled."""
         try:
             bucket_type = await self._lookup_bucket_type(bucket)
-        except Exception:
+        except Exception as e:
             logger.warning(
-                f"Could not determine if bucket '{bucket}' is HNS-enabled, falling back to default non-HNS"
+                f"Could not determine if bucket '{bucket}' is HNS-enabled, falling back to default non-HNS: {e}",
+                stack_info=True,
             )
             return False
 
@@ -325,10 +337,9 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         self.dircache.pop(path1, None)
         parent1 = self._parent(path1)
         if parent1 in self.dircache:
-            for i, entry in enumerate(self.dircache[parent1]):
-                if entry.get("name") == path1:
-                    self.dircache[parent1].pop(i)
-                    break
+            self.dircache[parent1] = [
+                e for e in self.dircache[parent1] if e.get("name") != path1
+            ]
 
         # 3. Invalidate the destination path and update its parent's cache.
         self.dircache.pop(path2, None)
@@ -362,13 +373,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         bucket1, key1, _ = self.split_path(path1)
         bucket2, key2, _ = self.split_path(path2)
 
-        is_hns = False
-        try:
-            is_hns = await self._is_bucket_hns_enabled(bucket1)
-        except Exception as e:
-            logger.warning(
-                f"Could not determine if bucket '{bucket1}' is HNS-enabled, falling back to default mv: {e}"
-            )
+        is_hns = await self._is_bucket_hns_enabled(bucket1)
 
         if not is_hns:
             logger.debug(
@@ -432,16 +437,16 @@ class ExtendedGcsFileSystem(GCSFileSystem):
     mv = asyn.sync_wrapper(_mv)
 
     async def _mkdir(
-        self, path, create_parents=False, enable_hierarchial_namespace=False, **kwargs
+        self, path, create_parents=False, enable_hierarchical_namespace=False, **kwargs
     ):
         """
         If the path does not contain an object key, a new bucket is created.
-        If `enable_hierarchial_namespace` is True, the bucket will have Hierarchical Namespace enabled.
+        If `enable_hierarchical_namespace` is True, the bucket will have Hierarchical Namespace enabled.
 
         For HNS-enabled buckets, this method creates a folder object. If
         `create_parents` is True, any missing parent folders are also created.
 
-        If bucket doesn't exist, enable_hierarchial_namespace and create_parents are set to True
+        If bucket doesn't exist, enable_hierarchical_namespace and create_parents are set to True
         and the path includes a key then HNS-enabled bucket will be created
         and also the folders within that bucket.
 
@@ -452,7 +457,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         may involve creating a bucket or doing nothing (as GCS has no true empty directories).
         """
         path = self._strip_protocol(path)
-        if enable_hierarchial_namespace:
+        if enable_hierarchical_namespace:
             kwargs["hierarchicalNamespace"] = {"enabled": True}
             # HNS buckets require uniform bucket-level access.
             kwargs["iamConfiguration"] = {"uniformBucketLevelAccess": {"enabled": True}}
@@ -470,19 +475,14 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
         is_hns = False
         # If creating an HNS bucket, check for its existence first.
-        if create_parents and enable_hierarchial_namespace:
+        if create_parents and enable_hierarchical_namespace:
             if not await self._exists(bucket):
                 await super()._mkdir(bucket, create_parents=True, **kwargs)
                 is_hns = True  # Skip HNS check since we just created it.
 
         if not is_hns:
             # If the bucket was not created above, we need to check its type.
-            try:
-                is_hns = await self._is_bucket_hns_enabled(bucket)
-            except Exception as e:
-                logger.warning(
-                    f"Could not determine if bucket '{bucket}' is HNS-enabled, falling back to default mkdir: {e}"
-                )
+            is_hns = await self._is_bucket_hns_enabled(bucket)
 
         if not is_hns:
             return await super()._mkdir(path, create_parents=create_parents, **kwargs)
@@ -567,6 +567,77 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         # Fallback to standard GCS behavior for non-HNS buckets
         return await super()._get_directory_info(path, bucket, key, generation)
 
+    async def _rmdir(self, path):
+        """
+        Deletes an empty directory. Overrides the parent `_rmdir` to delete
+        empty directories in HNS-enabled buckets.
+        """
+        path = self._strip_protocol(path)
+        bucket, key, _ = self.split_path(path)
+
+        # The parent _rmdir is only for deleting buckets. If key is empty,
+        # given path is a bucket, we can fall back.
+        if not key:
+            return await super()._rmdir(path)
+
+        is_hns = await self._is_bucket_hns_enabled(bucket)
+        if not is_hns:
+            return await super()._rmdir(path)
+
+        # In HNS buckets, a placeholder object (e.g., 'a/b/c/') might exist,
+        # which would cause rmdir('a/b/c') to fail because the directory is not empty.
+        # To handle this, we first attempt to delete the placeholder object.
+        # If it doesn't exist, _rm_file will raise a FileNotFoundError, which we can
+        # safely ignore and proceed with the directory deletion.
+        #
+        # Note: This may delete the placeholder even if the directory contains
+        # other files and the final `delete_folder` call fails. This side
+        # effect is acceptable because placeholder objects are used to simulate
+        # folders and are not strictly necessary in HNS-enabled buckets, which
+        # have native folder entities.
+        try:
+            placeholder_path = f"{path.rstrip('/')}/"
+
+            await self._rm_file(placeholder_path)
+            logger.debug(
+                f"Removed placeholder object '{placeholder_path}' before rmdir."
+            )
+        except FileNotFoundError:
+            # This is expected if no placeholder object exists and can be safely ignored.
+            pass
+
+        try:
+            logger.info(f"Using HNS-aware rmdir for '{path}'.")
+            folder_name = f"projects/_/buckets/{bucket}/folders/{key.rstrip('/')}"
+            request = storage_control_v2.DeleteFolderRequest(name=folder_name)
+
+            logger.debug(f"delete_folder request: {request}")
+            await self._storage_control_client.delete_folder(request=request)
+
+            # Remove the directory from the cache and from its parent's listing.
+            self.dircache.pop(path, None)
+            parent = self._parent(path)
+            if parent in self.dircache:
+                # Remove the deleted directory entry from the parent's listing.
+                self.dircache[parent] = [
+                    e for e in self.dircache[parent] if e.get("name") != path
+                ]
+            return
+        except api_exceptions.NotFound as e:
+            # This can happen if the directory does not exist, or if the path
+            # points to a file object instead of a directory.
+            raise FileNotFoundError(f"rmdir failed for path: {path}: {e}") from e
+        except api_exceptions.FailedPrecondition as e:
+            # This can happen if the directory is not empty.
+            raise OSError(
+                f"Pre condition failed for rmdir for path: {path}: {e}"
+            ) from e
+        except Exception as e:
+            logger.error(f"HNS rmdir: Failed to delete folder '{path}': {e}")
+            raise
+
+    rmdir = asyn.sync_wrapper(_rmdir)
+
     async def _put_file(
         self,
         lpath,
@@ -580,6 +651,34 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         mode="overwrite",
         **kwargs,
     ):
+        """Upload a local file.
+
+        This method is optimized for Zonal buckets, using gRPC for uploads.
+        In zonal buckets, file is left *unfinalized* by default unless
+        `finalize_on_close` is set to True.
+        For non-Zonal buckets, it delegates to the parent class's implementation.
+
+        Parameters
+        ----------
+        lpath: str
+            Path to the local file to be uploaded.
+        rpath: str
+            Path on GCS to upload the file to.
+        metadata: dict, optional
+            Unsupported for Zonal buckets and will be ignored.
+        consistency: str, optional
+            Unsupported for Zonal buckets and will be ignored.
+        content_type: str, optional
+            Unsupported for Zonal buckets and will be ignored except for the default.
+        chunksize: int, optional
+            The size of chunks to upload data in.
+        callback: fsspec.callbacks.Callback, optional
+            Callback to monitor the upload progress.
+        fixed_key_metadata: dict, optional
+            Unsupported for Zonal buckets and will be ignored.
+        mode: str, optional
+            The write mode, either 'overwrite' or 'create'.
+        """
         bucket, key, generation = self.split_path(rpath)
         if not await self._is_zonal_bucket(bucket):
             return await super()._put_file(
@@ -613,6 +712,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 "These parameters will be ignored."
             )
         await self._get_grpc_client()
+        # Works for both 'overwrite' and 'create' modes
         writer = await zb_hns_utils.init_aaow(self.grpc_client, bucket, key)
 
         try:
@@ -636,6 +736,32 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         mode="overwrite",
         **kwargs,
     ):
+        """Upload bytes to a file.
+
+        This method is optimized for Zonal buckets, using gRPC for uploads.
+        In zonal buckets, file is left *unfinalized* by default unless
+        `finalize_on_close` is set to True.
+        For non-Zonal buckets, it delegates to the parent class's implementation.
+
+        Parameters
+        ----------
+        path: str
+            Path to the file to be written.
+        data: bytes
+            The content to write to the file.
+        metadata: dict, optional
+            Unsupported for Zonal buckets and will be ignored.
+        consistency: str, optional
+            Unsupported for Zonal buckets and will be ignored.
+        content_type: str, optional
+            Unsupported for Zonal buckets and will be ignored, except for the default.
+        fixed_key_metadata: dict, optional
+            Unsupported for Zonal buckets and will be ignored.
+        chunksize: int, optional
+            The size of chunks to upload data in.
+        mode: str, optional
+            The write mode, either 'overwrite' or 'create'.
+        """
         bucket, key, generation = self.split_path(path)
         if not await self._is_zonal_bucket(bucket):
             return await super()._pipe_file(
@@ -659,6 +785,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 "fixed_key_metadata during upload. These parameters will be ignored."
             )
         await self._get_grpc_client()
+        # Works for both 'overwrite' and 'create' modes
         writer = await zb_hns_utils.init_aaow(self.grpc_client, bucket, key)
         try:
             for i in range(0, len(data), chunksize):
@@ -669,10 +796,93 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
         self.invalidate_cache(self._parent(path))
 
+    async def _get_file(self, rpath, lpath, callback=None, **kwargs):
+        bucket, key, generation = self.split_path(rpath)
+        if not await self._is_zonal_bucket(bucket):
+            return await super()._get_file(
+                rpath,
+                lpath,
+                callback=callback,
+                **kwargs,
+            )
+
+        if os.path.isdir(lpath):
+            return
+        callback = callback or NoOpCallback()
+
+        mrd = None
+        try:
+            await self._get_grpc_client()
+            mrd = await AsyncMultiRangeDownloader.create_mrd(
+                self.grpc_client, bucket, key, generation
+            )
+
+            size = mrd.persisted_size
+            if size is None:
+                logger.warning(
+                    "AsyncMultiRangeDownloader (MRD) has no 'persisted_size'. "
+                    "Falling back to _info() to get the file size. "
+                    "This may result in incorrect behavior for unfinalized objects."
+                )
+                size = (await self._info(rpath))["size"]
+            callback.set_size(size)
+
+            lparent = os.path.dirname(lpath) or os.curdir
+            os.makedirs(lparent, exist_ok=True)
+
+            chunksize = kwargs.get("chunksize", 4096 * 32)  # 128KB default
+            offset = 0
+
+            with open(lpath, "wb") as f2:
+                while True:
+                    if offset >= size:
+                        break
+
+                    data = await zb_hns_utils.download_range(
+                        offset=offset, length=chunksize, mrd=mrd
+                    )
+                    if not data:
+                        break
+
+                    f2.write(data)
+                    offset += len(data)
+                    callback.relative_update(len(data))
+        except Exception as e:
+            # Clean up the corrupted file before raising error
+            if os.path.exists(lpath):
+                os.remove(lpath)
+            raise e
+        finally:
+            if mrd:
+                await mrd.close()
+
+    async def _do_list_objects(
+        self,
+        path,
+        max_results=None,
+        delimiter="/",
+        prefix="",
+        versions=False,
+        **kwargs,
+    ):
+        bucket, _, _ = self.split_path(path)
+        if await self._is_bucket_hns_enabled(bucket) and delimiter == "/":
+            kwargs["includeFoldersAsPrefixes"] = "true"
+
+        return await super()._do_list_objects(
+            path,
+            max_results=max_results,
+            delimiter=delimiter,
+            prefix=prefix,
+            versions=versions,
+            **kwargs,
+        )
+
 
 async def upload_chunk(fs, location, data, offset, size, content_type):
     """
-    Uploads a chunk of data using AsyncAppendableObjectWriter.
+    Uploads a chunk of data using AsyncAppendableObjectWriter for zonal buckets.
+    Finalizes the upload when the total uploaded data size reaches the specified size.
     Delegates to core upload_chunk implementaion for Non-Zonal buckets.
     """
     # If `location` is an HTTP resumable-upload URL (string), delegate to core upload_chunk
@@ -723,6 +933,25 @@ async def initiate_upload(
     """
     Initiates an upload for Zonal buckets by creating an AsyncAppendableObjectWriter.
     Delegates to core initiate_upload implementaion for Non-Zonal buckets.
+
+    Parameters
+    ----------
+    fs: GCSFileSystem
+        The GCS filesystem instance.
+    bucket: str
+        The target bucket name.
+    key: str
+        The target object key.
+    content_type: str, optional
+        Unsupported for Zonal buckets and will be ignored, except for the default.
+    metadata: dict, optional
+        Unsupported for Zonal buckets and will be ignored.
+    fixed_key_metadata: dict, optional
+        Unsupported for Zonal buckets and will be ignored.
+    mode: str, optional
+        The write mode, either 'overwrite' or 'create'.
+    kms_key_name: str, optional
+        Unsupported for Zonal buckets and will be ignored.
     """
     if not await fs._is_zonal_bucket(bucket):
         from gcsfs.core import initiate_upload as core_initiate_upload
@@ -770,7 +999,32 @@ async def simple_upload(
 ):
     """
     Performs a simple, single-request upload to Zonal bucket using gRPC.
+    In zonal buckets, file is left *unfinalized* by default unless
+    `finalize_on_close` is set to True.
     Delegates to core simple_upload implementaion for Non-Zonal buckets.
+
+    Parameters
+    ----------
+    fs: GCSFileSystem
+        The GCS filesystem instance.
+    bucket: str
+        The target bucket name.
+    key: str
+        The target object key.
+    datain: bytes
+        The data to be uploaded.
+    metadatain: dict, optional
+        Unsupported for Zonal buckets and will be ignored.
+    consistency: str, optional
+        Unsupported for Zonal buckets and will be ignored.
+    content_type: str, optional
+        Unsupported for Zonal buckets and will be ignored, except for the default.
+    fixed_key_metadata: dict, optional
+        Unsupported for Zonal buckets and will be ignored.
+    mode: str, optional
+        The write mode, either 'overwrite' or 'create'.
+    kms_key_name: str, optional
+        Unsupported for Zonal buckets and will be ignored.
     """
     if not await fs._is_zonal_bucket(bucket):
         from gcsfs.core import simple_upload as core_simple_upload
