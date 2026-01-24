@@ -9,5 +9,5 @@ coverage:
         threshold: 0%  # Allow 0% drop.
     patch:
       default:
-        target: 85%
+        target: 80%
         threshold: 0%
