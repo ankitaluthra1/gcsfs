@@ -315,6 +315,132 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             if mrd_created:
                 await mrd.close()
 
+    async def _cat_ranges(
+        self,
+        paths,
+        starts,
+        ends,
+        max_gap=None,
+        batch_size=None,
+        on_error="return",
+        **kwargs,
+    ):
+        """Fetch multiple byte ranges from one or more files with MRD optimization for zonal buckets.
+
+        This overrides the parent method to use gRPC-based MRD for zonal buckets,
+        batching all ranges into a single connection instead of individual HTTP requests per range.
+
+        Args:
+            paths: list of filepaths on this filesystem
+            starts, ends: int or list of byte limits for reads
+            max_gap, batch_size, on_error: see parent class
+
+        Returns:
+            list of byte contents for each range
+        """
+        from collections import defaultdict
+        from collections.abc import Iterable
+
+        if max_gap is not None:
+            raise NotImplementedError
+        if not isinstance(paths, list):
+            raise TypeError
+        if not isinstance(starts, Iterable):
+            starts = [starts] * len(paths)
+        if not isinstance(ends, Iterable):
+            ends = [ends] * len(paths)
+        if len(starts) != len(paths) or len(ends) != len(paths):
+            raise ValueError
+
+        # Group ranges by bucket type (zonal vs non-zonal)
+        zonal_ranges_by_object = defaultdict(
+            list
+        )  # (bucket, object_name, gen) -> [(idx, start, end)]
+        regional_indices = []  # Indices of ranges in regional buckets
+        regional_paths = []
+        regional_starts = []
+        regional_ends = []
+
+        results = [None] * len(paths)
+
+        for idx, (path, start, end) in enumerate(zip(paths, starts, ends)):
+            bucket, object_name, generation = self.split_path(path)
+
+            # Check if this is a zonal bucket
+            if await self._is_zonal_bucket(bucket):
+                zonal_ranges_by_object[(bucket, object_name, generation)].append(
+                    (idx, start, end)
+                )
+            else:
+                # Collect regional bucket ranges
+                regional_indices.append(idx)
+                regional_paths.append(path)
+                regional_starts.append(start)
+                regional_ends.append(end)
+
+        # Process regional buckets: call parent _cat_ranges once with all regional ranges
+        if regional_paths:
+            regional_results = await super()._cat_ranges(
+                regional_paths,
+                regional_starts,
+                regional_ends,
+                max_gap=max_gap,
+                batch_size=batch_size,
+                on_error=on_error,
+                **kwargs,
+            )
+            for i, idx in enumerate(regional_indices):
+                results[idx] = regional_results[i]
+
+        # Process zonal buckets: use MRD for all ranges of each object
+        for (
+            bucket,
+            object_name,
+            generation,
+        ), object_ranges in zonal_ranges_by_object.items():
+            mrd_created = False
+            try:
+                await self._get_grpc_client()
+                mrd = await AsyncMultiRangeDownloader.create_mrd(
+                    self.grpc_client, bucket, object_name, generation
+                )
+                mrd_created = True
+
+                file_size = mrd.persisted_size
+                if file_size is None:
+                    logger.warning(
+                        "AsyncMultiRangeDownloader (MRD) exists but has no 'persisted_size'. "
+                        "Falling back to _info() to get the file size. "
+                        "This may result in incorrect behavior for unfinalized objects."
+                    )
+                    file_size = (await self._info(f"{bucket}/{object_name}"))["size"]
+
+                # Process all ranges for this object: convert to (offset, length) tuples
+                path_template = f"{bucket}/{object_name}"
+                ranges_list = []
+                index_mapping = []  # Maps position in ranges_list to results index
+
+                for idx, start, end in object_ranges:
+                    offset, length = await self._process_limits_to_offset_and_length(
+                        path_template, start, end, file_size
+                    )
+                    ranges_list.append((offset, length))
+                    index_mapping.append(idx)
+
+                # Call download_ranges with all ranges at once
+                downloaded_data = await zb_hns_utils.download_ranges(ranges_list, mrd)
+
+                # Map results back to original indices
+                for i, data in enumerate(downloaded_data):
+                    results[index_mapping[i]] = data
+
+            finally:
+                # Explicit cleanup if we created the MRD
+                if mrd_created:
+                    await mrd.close()
+
+        return results
+
     async def _is_bucket_hns_enabled(self, bucket):
         """Checks if a bucket has Hierarchical Namespace enabled."""
         try:
