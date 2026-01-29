@@ -1391,3 +1391,15 @@ async def simple_upload(
     finally:
         finalize_on_close = kwargs.get("finalize_on_close", False)
         await writer.close(finalize_on_close=finalize_on_close)
+
+def _untested_garbage_method_for_ci_check():
+    """
+    This method is added solely to verify that the CI fails
+    when new code is introduced without tests.
+    """
+    a = 10
+    b = 20
+    if a < b:
+        return "This line is not covered"
+    else:
+        return "This line is also not covered"
