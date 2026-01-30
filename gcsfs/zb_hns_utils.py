@@ -1,7 +1,7 @@
 import logging
 from io import BytesIO
 
-from google.cloud.storage._experimental.asyncio.async_appendable_object_writer import (
+from google.cloud.storage.asyncio.async_appendable_object_writer import (
     _DEFAULT_FLUSH_INTERVAL_BYTES,
     AsyncAppendableObjectWriter,
 )
