@@ -1,0 +1,1091 @@
+"""
+This module contains integration tests for Hierarchical Namespace (HNS) enabled buckets.
+
+These tests are designed to run against a real GCS backend and require specific
+configuration:
+- A GCS bucket with HNS enabled must be specified in the environment variable mentioned in `gcsfs/tests/settings.py`.
+- `STORAGE_EMULATOR_HOST` must be set to "https://storage.googleapis.com" to use the real GCS endpoint.
+- The `GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT` environment variable must be set to 'true'.
+
+Each test class within this module should focus on a specific filesystem operation
+that has been extended or modified to support HNS features, such as `mv` (rename)
+and `mkdir`.
+"""
+
+import os
+import uuid
+
+import pytest
+
+from gcsfs.extended_gcsfs import BucketType
+from gcsfs.tests.settings import TEST_HNS_BUCKET
+
+should_run_hns = os.getenv("GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT", "false").lower() in (
+    "true",
+    "1",
+)
+
+# Skip these tests if not running against a real GCS backend or if experimentation flag is not set.
+pytestmark = pytest.mark.skipif(
+    os.environ.get("STORAGE_EMULATOR_HOST") != "https://storage.googleapis.com"
+    or not should_run_hns,
+    reason="This test class is for real GCS HNS buckets only and requires experimental flag.",
+)
+
+
+class TestExtendedGcsFileSystemMv:
+    """Integration tests for the _mv method in ExtendedGcsFileSystem."""
+
+    rename_success_params = [
+        pytest.param("old_dir", "new_dir", id="simple_rename_at_root"),
+        pytest.param(
+            "nested/old_dir",
+            "nested/new_dir",
+            id="rename_within_nested_dir",
+        ),
+    ]
+
+    @pytest.mark.parametrize("path1, path2", rename_success_params)
+    def test_hns_folder_rename_success(self, gcs_hns, path1, path2):
+        """Test successful HNS folder rename."""
+        gcsfs = gcs_hns
+        path1 = f"{TEST_HNS_BUCKET}/{path1}"
+        path2 = f"{TEST_HNS_BUCKET}/{path2}"
+
+        file_in_root = f"{path1}/file1.txt"
+        nested_file = f"{path1}/sub_dir/file2.txt"
+
+        gcsfs.touch(file_in_root)
+        gcsfs.touch(nested_file)
+
+        gcsfs.mv(path1, path2)
+
+        # Verify that the old path no longer exist
+        assert not gcsfs.exists(path1)
+
+        # Verify that the new paths exist
+        assert gcsfs.exists(path2)
+        assert gcsfs.exists(f"{path2}/file1.txt")
+        assert gcsfs.exists(f"{path2}/sub_dir/file2.txt")
+
+    def test_hns_folder_rename_with_protocol(self, gcs_hns):
+        """Test successful HNS folder rename when paths include the protocol."""
+        gcsfs = gcs_hns
+        path1_no_proto = f"{TEST_HNS_BUCKET}/old_dir_proto"
+        path2_no_proto = f"{TEST_HNS_BUCKET}/new_dir_proto"
+        path1 = f"gs://{path1_no_proto}"
+        path2 = f"gs://{path2_no_proto}"
+
+        file_in_root = f"{path1}/file1.txt"
+        gcsfs.touch(file_in_root)
+
+        gcsfs.mv(path1, path2)
+
+        assert not gcsfs.exists(path1)
+        assert gcsfs.exists(path2)
+
+    def test_hns_empty_folder_rename_success(self, gcs_hns):
+        """Test successful HNS rename of an empty folder."""
+        gcsfs = gcs_hns
+        path1 = f"{TEST_HNS_BUCKET}/empty_old_dir"
+        path2 = f"{TEST_HNS_BUCKET}/empty_new_dir"
+
+        gcsfs.mkdir(path1)
+
+        gcsfs.mv(path1, path2)
+
+        assert not gcsfs.exists(path1)
+        assert gcsfs.exists(path2)
+
+    def test_file_rename_fallback_to_super_mv(
+        self,
+        gcs_hns,
+    ):
+        """Test scenarios that should fall back to the parent's mv method."""
+        gcsfs = gcs_hns
+        path1 = f"{TEST_HNS_BUCKET}/file.txt"
+        path2 = f"{TEST_HNS_BUCKET}/new_file.txt"
+
+        gcsfs.touch(path1)
+        gcsfs.mv(path1, path2)
+
+        assert not gcsfs.exists(path1)
+        assert gcsfs.exists(path2)
+
+    def test_folder_rename_to_root_directory(
+        self,
+        gcs_hns,
+    ):
+        # TODO: Un-skip the integration test once rm is implemented for HNS buckets.
+        """Test scenarios that should fall back to the parent's mv method."""
+        gcsfs = gcs_hns
+        dir_name = "root_dir"
+        path1 = f"{TEST_HNS_BUCKET}/test/{dir_name}"
+        path2 = f"{TEST_HNS_BUCKET}/"
+
+        gcsfs.touch(f"{path1}/file.txt")
+        gcsfs.mv(path1, path2, recursive=True)
+
+        assert not gcsfs.exists(path1)
+        assert gcsfs.exists(path2)
+        assert gcsfs.exists(f"{path2.rstrip('/')}/{dir_name}")
+        assert gcsfs.exists(f"{path2.rstrip('/')}/{dir_name}/file.txt")
+
+    def test_hns_rename_fails_if_parent_does_not_exist(self, gcs_hns):
+        """Test that HNS rename fails if the destination's parent does not exist."""
+        gcsfs = gcs_hns
+        path1 = f"{TEST_HNS_BUCKET}/dir_to_move"
+        path2 = f"{TEST_HNS_BUCKET}/new_parent/new_name"
+        gcsfs.touch(f"{path1}/file.txt")
+
+        expected_msg = "HNS rename failed: 400 The parent folder does not exist."
+        with pytest.raises(OSError, match=expected_msg):
+            gcsfs.mv(path1, path2)
+
+    def test_hns_folder_rename_cache_invalidation(self, gcs_hns):
+        """Test that HNS folder rename correctly invalidates and updates the cache."""
+        gcsfs = gcs_hns
+        base_dir = f"{TEST_HNS_BUCKET}/cache_test"
+        path1 = f"{base_dir}/old_dir"
+        destination_parent = f"{base_dir}/destination_parent"
+        path2 = f"{destination_parent}/new_nested_dir"
+        sibling_dir = f"{base_dir}/sibling_dir"
+
+        # --- Setup ---
+        gcsfs.touch(f"{path1}/sub/file.txt")
+        gcsfs.touch(f"{sibling_dir}/sibling_file.txt")
+        gcsfs.touch(f"{destination_parent}/file.txt")
+
+        # --- Populate Cache ---
+        # Use find() to deeply populate the cache for the entire base directory
+        gcsfs.find(base_dir, withdirs=True)
+
+        # --- Pre-Rename Assertions ---
+        # Ensure all relevant paths are in the cache before the rename
+        assert base_dir in gcsfs.dircache
+        assert path1 in gcsfs.dircache
+        assert destination_parent in gcsfs.dircache
+        assert f"{path1}/sub" in gcsfs.dircache
+        assert sibling_dir in gcsfs.dircache
+
+        # --- Perform Rename ---
+        gcsfs.mv(path1, path2)
+
+        # --- Post-Rename Cache Assertions ---
+        # 1. Source directory and its descendants should be removed from the cache
+        assert path1 not in gcsfs.dircache
+        assert f"{path1}/sub" not in gcsfs.dircache
+
+        # 2. The destination path should be removed from cache
+        assert path2 not in gcsfs.dircache, "Destination path should not be in dircache"
+
+        # 3. The parent directory of the source should have been updated, not cleared.
+        # It should now just contain the original sibling.
+        assert base_dir in gcsfs.dircache
+        source_parent_listing = gcsfs.dircache[base_dir]
+
+        # Check that the old directory is gone from the parent's listing
+        assert not any(
+            entry["name"] == path1 for entry in source_parent_listing
+        ), "Old directory should be removed from parent cache"
+
+        # Check that the sibling directory is still there
+        assert any(
+            entry["name"] == sibling_dir for entry in source_parent_listing
+        ), "Sibling directory should remain in parent cache"
+
+        # 4. The destination parent's cache should be updated with the new path
+        assert destination_parent in gcsfs.dircache
+        assert any(
+            entry["name"] == path2 for entry in gcsfs.dircache[destination_parent]
+        ), "New path should be added to destination parent cache"
+
+        # Cache for sibling folder should be untouched
+        assert sibling_dir in gcsfs.dircache
+
+    def test_hns_rename_raises_file_not_found(self, gcs_hns):
+        """Test that NotFound from API raises FileNotFoundError."""
+        gcsfs = gcs_hns
+        path1 = f"{TEST_HNS_BUCKET}/non_existent_source"
+        path2 = f"{TEST_HNS_BUCKET}/new_dir"
+        with pytest.raises(FileNotFoundError):
+            gcsfs.mv(path1, path2)
+
+    def test_hns_rename_raises_os_error_if_destination_exists(self, gcs_hns):
+        """Test that FailedPrecondition from API raises OSError."""
+        gcsfs = gcs_hns
+        path1 = f"{TEST_HNS_BUCKET}/dir"
+        path2 = f"{TEST_HNS_BUCKET}/existing_dir"
+
+        gcsfs.touch(f"{path1}/file.txt")
+        gcsfs.touch(f"{path2}/file.txt")
+
+        expected_msg = f"HNS rename failed due to conflict for '{path1}' to '{path2}'"
+        with pytest.raises(FileExistsError, match=expected_msg):
+            gcsfs.mv(path1, path2)
+
+    def test_rename_placeholder(self, gcs_hns):
+        """
+        Test rename behavior when a placeholder object exists.
+        """
+        gcsfs = gcs_hns
+        base_dir = f"{TEST_HNS_BUCKET}/rename_placeholder"
+        src_placeholder = f"{base_dir}/src_dir"
+        src_file = f"{src_placeholder}/file"
+        dest_placeholder = f"{base_dir}/dest_dir"
+        dest_file = f"{dest_placeholder}/file"
+
+        # Create a placeholder object (ends with /)
+        gcsfs.touch(f"{src_placeholder}/")
+        gcsfs.touch(src_file)
+
+        gcsfs.invalidate_cache()
+
+        # Rename directory
+        gcsfs.mv(f"{src_placeholder}/", dest_placeholder)
+
+        assert not gcsfs.exists(src_placeholder)
+        assert not gcsfs.exists(src_file)
+        assert gcsfs.exists(dest_placeholder)
+        assert gcsfs.exists(dest_file)
+        assert gcsfs.exists(f"{dest_placeholder}/")
+
+
+class TestExtendedGcsFileSystemMkdir:
+    """Integration tests for the mkdir method in ExtendedGcsFileSystem."""
+
+    def test_hns_mkdir_success(self, gcs_hns):
+        """Test successful HNS folder creation."""
+        gcsfs = gcs_hns
+        dir_path = f"{TEST_HNS_BUCKET}/new_dir_integration"
+        dir_path_with_trailing_slash = (
+            f"{TEST_HNS_BUCKET}/mkdir_dir_with_trailing_slash"
+        )
+
+        gcsfs.mkdir(dir_path)
+        assert gcsfs.isdir(dir_path)
+        gcsfs.mkdir(f"{dir_path_with_trailing_slash}/")
+        assert gcsfs.isdir(dir_path_with_trailing_slash)
+
+    def test_hns_mkdir_nested_success_with_create_parents(self, gcs_hns):
+        """Test successful HNS folder creation for a nested path with create_parents=True."""
+        gcsfs = gcs_hns
+        parent_dir = f"{TEST_HNS_BUCKET}/nested_parent"
+        dir_path = f"{parent_dir}/new_nested_dir"
+        gcsfs.mkdir(dir_path, create_parents=True)
+        assert gcsfs.exists(parent_dir) and gcsfs.isdir(parent_dir)
+        assert gcsfs.exists(dir_path) and gcsfs.isdir(dir_path)
+
+    def test_hns_mkdir_nested_fails_if_create_parents_false(self, gcs_hns):
+        """Test HNS mkdir fails for nested path if create_parents=False and parent doesn't exist."""
+        gcsfs = gcs_hns
+        dir_path = f"{TEST_HNS_BUCKET}/non_existent_parent/new_dir"
+        with pytest.raises(FileNotFoundError):
+            gcsfs.mkdir(dir_path, create_parents=False)
+
+    def test_mkdir_in_non_existent_bucket_fails(self, gcs_hns):
+        """Test that mkdir fails when the target bucket does not exist."""
+        gcsfs = gcs_hns
+        bucket_name = f"gcsfs-non-existent-bucket-{uuid.uuid4()}"
+        dir_path = f"{bucket_name}/some_dir"
+
+        with pytest.raises(FileNotFoundError, match=f"{bucket_name}"):
+            gcsfs.mkdir(dir_path, create_parents=False)
+
+    def test_mkdir_in_non_existent_bucket_with_create_parents_succeeds(
+        self, gcs_hns, buckets_to_delete
+    ):
+        """Test that mkdir with create_parents=True creates the bucket."""
+        gcsfs = gcs_hns
+        bucket_name = f"gcsfs-bucket-mkdir-{uuid.uuid4()}"
+        dir_path = f"{bucket_name}/some_dir"
+        buckets_to_delete.add(bucket_name)
+
+        assert not gcsfs.exists(bucket_name)
+        gcsfs.mkdir(dir_path, create_parents=True)
+        assert gcsfs.exists(bucket_name)
+
+    def test_mkdir_hns_bucket_with_create_parents_succeeds(
+        self, gcs_hns, buckets_to_delete
+    ):
+        """Test mkdir with create_parents and enable_hierarchical_namespace creates an HNS bucket."""
+        gcsfs = gcs_hns
+        bucket_name = f"gcsfs-hns-bucket-mkdir-{uuid.uuid4()}"
+        dir_path = f"{bucket_name}/some_dir"
+        buckets_to_delete.add(bucket_name)
+
+        assert not gcsfs.exists(bucket_name)
+        gcsfs.mkdir(dir_path, create_parents=True, enable_hierarchical_namespace=True)
+        assert gcsfs.exists(bucket_name)
+        assert gcsfs.exists(dir_path)
+
+        assert gcsfs._sync_lookup_bucket_type(bucket_name) is BucketType.HIERARCHICAL
+
+    def test_mkdir_create_non_hns_bucket(self, gcs_hns, buckets_to_delete):
+        """Test creating a new non-HNS bucket by default."""
+        gcsfs = gcs_hns
+        bucket_path = f"new-non-hns-bucket-{uuid.uuid4()}"
+        buckets_to_delete.add(bucket_path)
+
+        assert not gcsfs.exists(bucket_path)
+        gcsfs.mkdir(bucket_path)
+        assert gcsfs.exists(bucket_path)
+        assert (
+            gcsfs._sync_lookup_bucket_type(bucket_path) is BucketType.NON_HIERARCHICAL
+        )
+
+    def test_mkdir_create_bucket_with_parent_params(self, gcs_hns, buckets_to_delete):
+        """Test creating a bucket passes parent-level parameters like enable_versioning."""
+        gcsfs = gcs_hns
+        bucket_path = f"new-versioned-bucket-{uuid.uuid4()}"
+        buckets_to_delete.add(bucket_path)
+
+        assert not gcsfs.exists(bucket_path)
+        gcsfs.mkdir(bucket_path, enable_versioning=True, enable_object_retention=True)
+        assert gcsfs.exists(bucket_path)
+
+    def test_mkdir_enable_hierarchical_namespace(self, gcs_hns, buckets_to_delete):
+        """Test creating a new HNS-enabled bucket."""
+        gcsfs = gcs_hns
+        bucket_path = f"new-hns-bucket-{uuid.uuid4()}"
+        buckets_to_delete.add(bucket_path)
+
+        assert not gcsfs.exists(bucket_path)
+        gcsfs.mkdir(bucket_path, enable_hierarchical_namespace=True)
+        assert gcsfs.exists(bucket_path)
+        assert gcsfs._sync_lookup_bucket_type(bucket_path) is BucketType.HIERARCHICAL
+
+
+class TestExtendedGcsFileSystemRmdir:
+    """Integration tests for the rmdir method in ExtendedGcsFileSystem."""
+
+    def test_hns_rmdir_success(self, gcs_hns):
+        """Test successful HNS empty directory deletion."""
+        gcsfs = gcs_hns
+        dir_path = f"{TEST_HNS_BUCKET}/empty_dir_to_delete"
+
+        gcsfs.mkdir(dir_path)
+        assert gcsfs.isdir(dir_path)
+
+        gcsfs.rmdir(dir_path)
+        assert not gcsfs.exists(dir_path)
+
+    def test_hns_rmdir_non_empty_raises_os_error(self, gcs_hns):
+        """Test that HNS rmdir on a non-empty directory raises OSError."""
+        gcsfs = gcs_hns
+        dir_path = f"{TEST_HNS_BUCKET}/non_empty_dir_rmdir"
+        gcsfs.touch(f"{dir_path}/file.txt")
+
+        with pytest.raises(OSError, match="Pre condition failed for rmdir"):
+            gcsfs.rmdir(dir_path)
+
+    def test_hns_rmdir_non_existing_dir_raises_not_found(self, gcs_hns):
+        """Test that HNS rmdir on a non-existent directory raises FileNotFoundError."""
+        gcsfs = gcs_hns
+        dir_path = f"{TEST_HNS_BUCKET}/non_existent_dir_rmdir"
+
+        with pytest.raises(FileNotFoundError, match="rmdir failed for path"):
+            gcsfs.rmdir(dir_path)
+
+    def test_rmdir_on_file_raises_file_not_found(self, gcs_hns):
+        """
+        Test that HNS rmdir on a file path raises FileNotFoundError.
+        The API returns NotFound in this case.
+        """
+        gcsfs = gcs_hns
+        file_path = f"{TEST_HNS_BUCKET}/a_file_for_rmdir.txt"
+        gcsfs.touch(file_path)
+
+        with pytest.raises(FileNotFoundError, match="rmdir failed for path"):
+            gcsfs.rmdir(file_path)
+
+    def test_hns_rmdir_with_empty_subfolder_raises_os_error(self, gcs_hns):
+        """Test that HNS rmdir on a directory with an empty subfolder raises OSError."""
+        gcsfs = gcs_hns
+        parent_dir = f"{TEST_HNS_BUCKET}/parent_dir_rmdir"
+        sub_dir = f"{parent_dir}/sub_dir"
+
+        gcsfs.mkdir(sub_dir, create_parents=True)
+
+        with pytest.raises(OSError, match="Pre condition failed for rmdir"):
+            gcsfs.rmdir(parent_dir)
+
+    def test_hns_rmdir_nested_directories_from_leaf(self, gcs_hns):
+        """Test deleting nested directories starting from the leaf."""
+        gcsfs = gcs_hns
+        parent_dir = f"{TEST_HNS_BUCKET}/parent_rmdir"
+        child_dir = f"{parent_dir}/child"
+        grandchild_dir = f"{child_dir}/grandchild"
+
+        gcsfs.mkdir(grandchild_dir, create_parents=True)
+
+        # Delete leaf first
+        gcsfs.rmdir(grandchild_dir)
+        assert not gcsfs.exists(grandchild_dir)
+
+        # Delete child
+        gcsfs.rmdir(child_dir)
+        assert not gcsfs.exists(child_dir)
+
+        # Delete parent
+        gcsfs.rmdir(parent_dir)
+        assert not gcsfs.exists(parent_dir)
+
+    def test_rmdir_on_folder_with_placeholder_object(self, gcs_hns):
+        """
+        Tests that rmdir successfully deletes a folder that contains its own
+        zero-byte placeholder object.
+        """
+        gcsfs = gcs_hns
+        folder_path = f"{TEST_HNS_BUCKET}/test-folder-with-placeholder"
+        placeholder_path = f"{folder_path}/"
+        gcsfs.touch(placeholder_path)
+
+        assert gcsfs.isdir(folder_path)
+        gcsfs.rmdir(folder_path)
+        assert not gcsfs.exists(folder_path)
+
+
+class TestExtendedGcsFileSystemLsIntegration:
+    """Integration tests for ls method on HNS buckets."""
+
+    @pytest.fixture
+    def base_test_dir(self, gcs_hns):
+        """
+        Fixture to create a unique temporary directory for each test.
+        Handles automatic cleanup after the test finishes.
+        """
+        unique_id = uuid.uuid4().hex
+        base_dir = f"{TEST_HNS_BUCKET}/integration_ls_{unique_id}"
+
+        # Explicitly create the base directory
+        # This prevents "Parent folder does not exist" errors in tests
+        gcs_hns.mkdir(base_dir)
+
+        # Yield the path to the test
+        yield base_dir
+
+        # Cleanup: Remove the directory and all contents
+        if gcs_hns.exists(base_dir):
+            try:
+                gcs_hns.rm(base_dir, recursive=True)
+            except Exception:
+                pass
+
+    def test_ls_empty_folder(self, gcs_hns, base_test_dir):
+        """Test that ls correctly lists an explicitly created empty folder."""
+        path_empty_folder = f"{base_test_dir}/empty_folder"
+
+        gcs_hns.mkdir(path_empty_folder)
+
+        # List the root directory
+        items_root = gcs_hns.ls(base_test_dir, detail=False)
+        items_root_cleaned = [item.rstrip("/") for item in items_root]
+
+        # List the empty directory
+        items_empty_folder = gcs_hns.ls(path_empty_folder, detail=False)
+
+        assert (
+            path_empty_folder in items_root_cleaned
+        ), f"Empty folder '{path_empty_folder}' missing from root listing"
+        assert items_empty_folder == []
+
+    def test_ls_nested_empty_folder(self, gcs_hns, base_test_dir):
+        """
+        Test that ls works for nested empty folders (e.g., parent/child).
+        Verifies both parent visibility in root and child visibility in parent.
+        """
+        path_parent = f"{base_test_dir}/parent_empty"
+        path_child = f"{path_parent}/sub_empty"
+
+        # Use create_parents=True to create 'parent_empty' automatically
+        gcs_hns.mkdir(path_child, create_parents=True)
+
+        # 1. Verify parent appears in root listing
+        items_root = gcs_hns.ls(base_test_dir, detail=False)
+        items_root_cleaned = [item.rstrip("/") for item in items_root]
+
+        assert (
+            path_parent in items_root_cleaned
+        ), f"Parent folder '{path_parent}' missing from root listing"
+
+        # 2. Verify child appears in parent listing
+        items_parent = gcs_hns.ls(path_parent, detail=False)
+        items_parent_cleaned = [item.rstrip("/") for item in items_parent]
+
+        assert (
+            path_child in items_parent_cleaned
+        ), f"Nested child folder '{path_child}' missing from parent listing"
+
+    def test_ls_folder_with_file(self, gcs_hns, base_test_dir):
+        """
+        Test that ls correctly lists a folder that exists implicitly because it contains a file.
+        """
+        path_parent = f"{base_test_dir}/parent_file"
+        path_file = f"{path_parent}/sub_file/file.txt"
+        path_sub_folder = f"{path_parent}/sub_file"
+
+        # Uploading a file automatically creates the directory structure on HNS
+        gcs_hns.touch(path_file)
+
+        # 1. Verify parent appears in root listing
+        items_root = gcs_hns.ls(base_test_dir, detail=False)
+        items_root_cleaned = [item.rstrip("/") for item in items_root]
+
+        assert (
+            path_parent in items_root_cleaned
+        ), f"Parent folder '{path_parent}' missing from root listing"
+
+        # 2. Verify sub-folder appears in parent listing
+        items_parent = gcs_hns.ls(path_parent, detail=False)
+        items_parent_cleaned = [item.rstrip("/") for item in items_parent]
+
+        assert (
+            path_sub_folder in items_parent_cleaned
+        ), f"Subfolder '{path_sub_folder}' missing from parent listing"
+
+        # 3. Verify file appears in sub-folder listing
+        items_sub = gcs_hns.ls(path_sub_folder, detail=False)
+        items_sub_cleaned = [item.rstrip("/") for item in items_sub]
+
+        assert (
+            path_file in items_sub_cleaned
+        ), f"File '{path_file}' missing from sub-folder listing"
+
+    def test_ls_placeholder(self, gcs_hns, base_test_dir):
+        """
+        Test ls behavior when a placeholder object exists alongside a directory.
+        """
+        parent = f"{base_test_dir}/ls_placeholder"
+        placeholder = f"{parent}/dir"
+        file_path = f"{placeholder}/file"
+
+        # Create a placeholder object (ends with /)
+        gcs_hns.touch(f"{placeholder}/")
+        gcs_hns.touch(file_path)
+        gcs_hns.invalidate_cache()
+
+        # ls on parent containing placeholder
+        out = gcs_hns.ls(parent)
+        assert len(out) == 1
+        assert out == [placeholder]
+        gcs_hns.invalidate_cache()
+
+        # ls on placeholder object itself (directory path)
+        out = gcs_hns.ls(placeholder)
+        assert len(out) == 2
+        assert sorted(out) == sorted([file_path, placeholder])
+        gcs_hns.invalidate_cache()
+
+        # ls on placeholder object with trailing slash
+        out = gcs_hns.ls(f"{placeholder}/")
+        assert len(out) == 2
+        assert sorted(out) == sorted([file_path, placeholder])
+
+
+class TestExtendedGcsFileSystemRm:
+    """Integration tests for the rm method in ExtendedGcsFileSystem."""
+
+    def test_rm_single_file(self, gcs_hns):
+        """Test deleting a single file."""
+        gcsfs = gcs_hns
+        dir_path = f"{TEST_HNS_BUCKET}/rm_single_file"
+        file_path = f"{dir_path}/rm_test_file.txt"
+        gcsfs.touch(file_path)
+        assert gcsfs.exists(file_path)
+
+        gcsfs.rm(file_path)
+        assert not gcsfs.exists(file_path)
+        assert gcsfs.exists(dir_path)
+
+    def test_rm_empty_folder_recursive(self, gcs_hns):
+        """Test deleting an empty folder with recursive=True."""
+        gcsfs = gcs_hns
+        dir_path = f"{TEST_HNS_BUCKET}/rm_empty_dir"
+        gcsfs.mkdir(dir_path)
+        assert gcsfs.isdir(dir_path)
+
+        gcsfs.rm(dir_path, recursive=True)
+        assert not gcsfs.exists(dir_path)
+
+    def test_rm_non_empty_folder_recursive(self, gcs_hns):
+        """Test recursively deleting a folder with files and subfolders."""
+        gcsfs = gcs_hns
+        base_dir = f"{TEST_HNS_BUCKET}/rm_non_empty"
+        file1 = f"{base_dir}/file1.txt"
+        nested_dir = f"{base_dir}/nested"
+        nested_file = f"{nested_dir}/nested_file.txt"
+
+        gcsfs.touch(file1)
+        gcsfs.touch(nested_file)
+
+        assert gcsfs.exists(base_dir)
+        assert gcsfs.exists(file1)
+        assert gcsfs.exists(nested_dir)
+        assert gcsfs.exists(nested_file)
+
+        gcsfs.rm(base_dir, recursive=True)
+
+        assert not gcsfs.exists(base_dir)
+        assert not gcsfs.exists(file1)
+        assert not gcsfs.exists(nested_dir)
+        assert not gcsfs.exists(nested_file)
+
+    def test_rm_folder_with_placeholder(self, gcs_hns):
+        """
+        Test deleting a folder that contains a placeholder object.
+        Covers rm on directory path, directory path with trailing slash, and parent directory.
+        """
+        gcsfs = gcs_hns
+        base_dir = f"{TEST_HNS_BUCKET}/rm_placeholder_test"
+
+        # Case 1: rm on directory path (no trailing slash)
+        dir_path_1 = f"{base_dir}/dir1"
+        placeholder_1 = f"{dir_path_1}/"
+        file_path_1 = f"{dir_path_1}/file"
+
+        gcsfs.touch(placeholder_1)
+        gcsfs.touch(file_path_1)
+
+        assert gcsfs.exists(dir_path_1)
+        assert gcsfs.exists(file_path_1)
+        gcsfs.rm(dir_path_1, recursive=True)
+        assert not gcsfs.exists(dir_path_1)
+        assert not gcsfs.exists(file_path_1)
+
+        # Case 2: rm on directory path with trailing slash
+        dir_path_2 = f"{base_dir}/dir2"
+        placeholder_2 = f"{dir_path_2}/"
+        file_path_2 = f"{dir_path_2}/file"
+
+        gcsfs.touch(placeholder_2)
+        gcsfs.touch(file_path_2)
+
+        assert gcsfs.exists(dir_path_2)
+        assert gcsfs.exists(file_path_2)
+        gcsfs.rm(placeholder_2, recursive=True)
+        assert not gcsfs.exists(dir_path_2)
+        assert not gcsfs.exists(file_path_2)
+
+        # Case 3: rm on parent containing placeholder
+        dir_path_3 = f"{base_dir}/dir3"
+        placeholder_3 = f"{dir_path_3}/"
+        file_path_3 = f"{dir_path_3}/file"
+
+        gcsfs.touch(placeholder_3)
+        gcsfs.touch(file_path_3)
+
+        assert gcsfs.exists(dir_path_3)
+        assert gcsfs.exists(file_path_3)
+        gcsfs.rm(base_dir, recursive=True)
+        assert not gcsfs.exists(base_dir)
+
+    def test_rm_non_existent_path_raises_error(self, gcs_hns):
+        """Test that rm on a non-existent path raises FileNotFoundError."""
+        gcsfs = gcs_hns
+        path = f"{TEST_HNS_BUCKET}/this_does_not_exist"
+        with pytest.raises(FileNotFoundError):
+            gcsfs.rm(path)
+
+    def test_rm_non_recursive_on_non_empty_dir_fails(self, gcs_hns):
+        """
+        Test that rm without recursive=True on a non-empty directory fails.
+        The implementation should see it as a directory and do nothing,
+        but because it's not empty, it won't be deleted.
+        """
+        gcsfs = gcs_hns
+        dir_path = f"{TEST_HNS_BUCKET}/rm_non_recursive_fail"
+        gcsfs.touch(f"{dir_path}/file.txt")
+
+        with pytest.raises(OSError, match="Pre condition failed"):
+            gcsfs.rm(dir_path, recursive=False)
+        assert gcsfs.exists(dir_path)
+
+    def test_rm_file_cache_invalidation(self, gcs_hns):
+        """
+        Test that rm on a file invalidates the cache for the file's direct
+        parent and all ancestor directories, but not sibling directories.
+        """
+        gcsfs = gcs_hns
+        base_dir = f"{TEST_HNS_BUCKET}/rm_file_cache_base"
+        parent_dir = f"{base_dir}/parent"
+        sibling_dir = f"{base_dir}/sibling"
+        file_to_delete = f"{parent_dir}/file_to_delete.txt"
+
+        # --- Setup ---
+        gcsfs.touch(file_to_delete)
+        gcsfs.touch(f"{sibling_dir}/sibling_file.txt")
+
+        # --- Populate Cache ---
+        gcsfs.find(base_dir, withdirs=True)
+        assert base_dir in gcsfs.dircache
+        assert parent_dir in gcsfs.dircache
+        assert sibling_dir in gcsfs.dircache
+
+        # --- Perform rm ---
+        gcsfs.rm(file_to_delete)
+
+        # --- Assert Cache Invalidation ---
+        # The parent of the deleted file and all its ancestors should be invalidated.
+        assert (
+            parent_dir not in gcsfs.dircache
+        ), "Direct parent of deleted file should be invalidated."
+        assert (
+            base_dir not in gcsfs.dircache
+        ), "Ancestor directory of deleted file should be invalidated."
+
+        # The cache for sibling directories should remain untouched.
+        assert (
+            sibling_dir in gcsfs.dircache
+        ), "Cache for sibling directories should not be invalidated."
+
+    def test_rm_recursive_cache_invalidation(self, gcs_hns):
+        """
+        Test that recursive rm invalidates the cache for the deleted directory,
+        its descendants, and its direct parent, but not unrelated directories.
+        """
+        gcsfs = gcs_hns
+        base_dir = f"{TEST_HNS_BUCKET}/rm_rec_cache_base"
+        dir_to_delete = f"{base_dir}/dir_to_delete"
+        nested_dir = f"{dir_to_delete}/nested"
+        sibling_dir = f"{base_dir}/sibling_dir"
+
+        # --- Setup ---
+        gcsfs.touch(f"{nested_dir}/file.txt")
+        gcsfs.touch(f"{sibling_dir}/sibling_file.txt")
+
+        # --- Populate Cache ---
+        gcsfs.find(base_dir, withdirs=True)
+        assert base_dir in gcsfs.dircache
+        assert dir_to_delete in gcsfs.dircache
+        assert nested_dir in gcsfs.dircache
+        assert sibling_dir in gcsfs.dircache
+
+        # --- Perform rm ---
+        gcsfs.rm(dir_to_delete, recursive=True)
+
+        # The deleted directory and its children should be gone from the cache.
+        assert dir_to_delete not in gcsfs.dircache, "Deleted directory should be gone."
+        assert (
+            nested_dir not in gcsfs.dircache
+        ), "Descendant of deleted dir should be gone."
+
+        # The direct parent's cache should be invalidated.
+        assert (
+            base_dir not in gcsfs.dircache
+        ), "Parent of deleted dir should be invalidated."
+
+        # The cache for sibling directories should remain untouched.
+        assert (
+            sibling_dir in gcsfs.dircache
+        ), "Cache for sibling directories should not be invalidated."
+
+    def test_rm_empty_folder_cache_invalidation(self, gcs_hns):
+        """
+        Test that rm on an empty folder invalidates the parent cache but not
+        the cache of sibling directories.
+        """
+        gcsfs = gcs_hns
+        base_dir = f"{TEST_HNS_BUCKET}/rm_empty_folder_cache"
+        dir_to_delete = f"{base_dir}/empty_to_delete"
+        sibling_dir = f"{base_dir}/sibling_dir"
+
+        # --- Setup ---
+        gcsfs.mkdir(dir_to_delete, create_parents=True)
+        gcsfs.touch(f"{sibling_dir}/file.txt")
+
+        # --- Populate Cache ---
+        gcsfs.find(base_dir, withdirs=True)
+        assert base_dir in gcsfs.dircache
+        assert sibling_dir in gcsfs.dircache
+
+        # --- Perform rm ---
+        gcsfs.rm(dir_to_delete, recursive=True)
+
+        # The parent's cache should be updated, not invalidated.
+        assert (
+            base_dir in gcsfs.dircache
+        ), "Parent of deleted dir should not be invalidated."
+
+        # The deleted directory should be removed from the parent's listing.
+        parent_listing = gcsfs.dircache[base_dir]
+        assert not any(
+            e["name"] == dir_to_delete for e in parent_listing
+        ), "Deleted directory should be removed from parent's cache listing."
+
+        # The cache for sibling directories should remain untouched.
+        assert (
+            sibling_dir in gcsfs.dircache
+        ), "Sibling directory cache should not be invalidated."
+
+
+@pytest.fixture()
+def test_structure(gcs_hns):
+    """Sets up a standard directory structure for find tests and cleans it up afterward."""
+    base_dir = f"{TEST_HNS_BUCKET}/integration-find-{uuid.uuid4()}"
+
+    structure = {
+        "base_dir": base_dir,
+        "root_file": f"{base_dir}/root_file.txt",
+        "empty_dir": f"{base_dir}/empty_dir",
+        "dir_with_files": f"{base_dir}/dir_with_files",
+        "file1": f"{base_dir}/dir_with_files/file1.txt",
+        "file2": f"{base_dir}/dir_with_files/file2.txt",
+        "nested_dir": f"{base_dir}/dir_with_files/nested_dir",
+        "nested_file": f"{base_dir}/dir_with_files/nested_dir/nested_file.txt",
+    }
+
+    print(f"--- Setting up test structure in: {base_dir} ---")
+    gcs_hns.touch(structure["root_file"])
+    gcs_hns.mkdir(structure["empty_dir"])
+    gcs_hns.touch(structure["file1"])
+    gcs_hns.touch(structure["file2"])
+    gcs_hns.touch(structure["nested_file"])
+    print("--- Test structure created. ---")
+
+    yield structure
+
+    print(f"--- Cleaning up test structure in: {base_dir} ---")
+    if gcs_hns.exists(base_dir):
+        gcs_hns.rm(base_dir, recursive=True)
+    print("--- Cleanup complete. ---")
+
+
+class TestExtendedGcsFileSystemFindIntegration:
+    """Integration tests for the find method on HNS buckets."""
+
+    def test_find_files_only(self, gcs_hns, test_structure):
+        """Test find without withdirs, which should only return files."""
+        base_dir = test_structure["base_dir"]
+        result = sorted(gcs_hns.find(base_dir))
+        expected = sorted(
+            [
+                test_structure["root_file"],
+                test_structure["file1"],
+                test_structure["file2"],
+                test_structure["nested_file"],
+            ]
+        )
+        assert result == expected
+
+    def test_find_withdirs(self, gcs_hns, test_structure):
+        """Test find with withdirs=True, which should return files and directories."""
+        base_dir = test_structure["base_dir"]
+        result = sorted(gcs_hns.find(base_dir, withdirs=True))
+        expected = sorted(
+            [
+                base_dir,
+                test_structure["root_file"],
+                test_structure["empty_dir"],
+                test_structure["dir_with_files"],
+                test_structure["file1"],
+                test_structure["file2"],
+                test_structure["nested_dir"],
+                test_structure["nested_file"],
+            ]
+        )
+        assert result == expected
+
+    def test_find_with_prefix(self, gcs_hns, test_structure):
+        """Test that find correctly filters by prefix within a directory."""
+        # Test finding a directory and a file that share a common prefix
+        result_dirs = gcs_hns.find(
+            test_structure["dir_with_files"], prefix="nested_dir", withdirs=True
+        )
+        expected_result = [
+            test_structure["nested_dir"],
+            test_structure["nested_file"],
+        ]
+        assert sorted(result_dirs) == sorted(
+            expected_result
+        ), "find with prefix and withdirs=True should return matching files and directories."
+
+    def test_find_on_file(self, gcs_hns, test_structure):
+        """Test that calling find on a single file returns only that file."""
+        file_path = test_structure["root_file"]
+        result = gcs_hns.find(file_path)
+        assert result == [
+            file_path
+        ], "find on a file path should return a list containing only that file."
+
+    @pytest.mark.parametrize("withdirs_param", [True, False])
+    def test_find_updates_dircache_without_prefix(
+        self, gcs_hns, test_structure, withdirs_param
+    ):
+        """Test that find() populates the dircache when no prefix is given."""
+        base_dir = test_structure["base_dir"]
+        gcs_hns.invalidate_cache()
+        assert not gcs_hns.dircache
+
+        # Run find to populate the cache
+        gcs_hns.find(base_dir, withdirs=withdirs_param)
+
+        # Verify that the cache is now populated for the found directories
+        assert base_dir in gcs_hns.dircache
+        assert test_structure["dir_with_files"] in gcs_hns.dircache
+        assert test_structure["nested_dir"] in gcs_hns.dircache
+        assert test_structure["empty_dir"] in gcs_hns.dircache
+
+        # Check content of the base directory's cache
+        base_dir_listing = {d["name"] for d in gcs_hns.dircache[base_dir]}
+        assert test_structure["root_file"] in base_dir_listing
+        assert test_structure["empty_dir"] in base_dir_listing
+        assert test_structure["dir_with_files"] in base_dir_listing
+
+        # Check content of the 'dir_with_files' cache
+        dir_with_files_listing = {
+            d["name"] for d in gcs_hns.dircache[test_structure["dir_with_files"]]
+        }
+        assert test_structure["file1"] in dir_with_files_listing
+        assert test_structure["file2"] in dir_with_files_listing
+        assert test_structure["nested_dir"] in dir_with_files_listing
+
+        # Check content of the 'nested_dir' cache
+        nested_dir_listing = {
+            d["name"] for d in gcs_hns.dircache[test_structure["nested_dir"]]
+        }
+        assert test_structure["nested_file"] in nested_dir_listing
+
+        # Check content of the 'empty_dir' cache
+        empty_dir_listing = {
+            d["name"] for d in gcs_hns.dircache[test_structure["empty_dir"]]
+        }
+        assert not empty_dir_listing
+
+    def test_find_does_not_update_dircache_with_prefix(self, gcs_hns, test_structure):
+        """Test that find() does NOT populate the dircache when a prefix is given."""
+        base_dir = test_structure["base_dir"]
+        gcs_hns.invalidate_cache()
+        assert not gcs_hns.dircache
+
+        # find with a prefix should not update the cache, as it's a partial listing
+        gcs_hns.find(base_dir, prefix="root_")
+
+        assert (
+            not gcs_hns.dircache
+        ), "dircache should not be updated when using a prefix"
+
+    def test_find_dircache_trailing_slash(self, gcs_hns, test_structure):
+        """Test that find populates dircache when path has trailing slash."""
+        path = test_structure["dir_with_files"]
+        gcs_hns.invalidate_cache()
+
+        gcs_hns.find(f"{path}/")
+
+        assert path in gcs_hns.dircache
+        assert len(gcs_hns.dircache[path]) > 0
+
+    def test_find_placeholder(self, gcs_hns, test_structure):
+        """
+        Test find behavior when a placeholder object exists.
+        """
+        base_dir = test_structure["base_dir"]
+        parent = f"{base_dir}/find_placeholder"
+        placeholder = f"{parent}/dir"
+        file_path = f"{placeholder}/file"
+
+        # Create a placeholder object (ends with /)
+        gcs_hns.touch(f"{placeholder}/")
+        gcs_hns.touch(file_path)
+
+        gcs_hns.invalidate_cache()
+
+        # find on parent containing placeholder
+        out = gcs_hns.find(parent)
+        assert len(out) == 2
+        assert sorted(out) == sorted([file_path, f"{placeholder}/"])
+        gcs_hns.invalidate_cache()
+
+        # find with dirs
+        out_dirs = gcs_hns.find(parent, withdirs=True)
+        assert len(out_dirs) == 4
+        assert sorted(out_dirs) == sorted(
+            [parent, placeholder, file_path, f"{placeholder}/"]
+        )
+        gcs_hns.invalidate_cache()
+
+        # find on placeholder object itself (directory path)
+        out = gcs_hns.find(placeholder, withdirs=True)
+        assert len(out) == 3
+        assert sorted(out) == sorted([placeholder, file_path, f"{placeholder}/"])
+        gcs_hns.invalidate_cache()
+
+        # find on placeholder object with trailing slash
+        out = gcs_hns.find(f"{placeholder}/", withdirs=True)
+        assert len(out) == 3
+        assert sorted(out) == sorted([placeholder, file_path, f"{placeholder}/"])
+
+
+class TestExtendedGcsFileSystemInfo:
+    """Integration tests for the info method on HNS buckets."""
+
+    def test_hns_info_nested_directory_success(self, gcs_hns):
+        """Test info() returns correct metadata for a nested HNS directory."""
+        gcsfs = gcs_hns
+        parent = f"info_parent_{uuid.uuid4().hex}"
+        child = "child_dir"
+        parent_dir_path = f"{TEST_HNS_BUCKET}/{parent}"
+        child_dir_path = f"{parent_dir_path}/{child}"
+
+        gcsfs.mkdir(child_dir_path, create_parents=True)
+
+        info = gcsfs.info(parent_dir_path)
+
+        assert info["type"] == "directory"
+        assert info["storageClass"] == "DIRECTORY"
+        assert info["name"].rstrip("/") == parent_dir_path
+        # Verify HNS-specific metadata fields provided by _get_directory_info
+        assert "ctime" in info
+        assert "mtime" in info
+        assert "metageneration" in info
+        assert info["size"] == 0
+
+        child_info = gcsfs.info(child_dir_path)
+
+        assert child_info["type"] == "directory"
+        assert child_info["storageClass"] == "DIRECTORY"
+        assert child_info["name"].rstrip("/") == child_dir_path
+        # Verify HNS-specific metadata fields provided by _get_directory_info
+        assert "ctime" in child_info
+        assert "mtime" in child_info
+        assert "metageneration" in child_info
+        assert child_info["size"] == 0
+
+    def test_hns_info_file_success(self, gcs_hns):
+        """Test info() behaves correctly for files in HNS buckets (fallback behavior)."""
+        gcsfs = gcs_hns
+        parent = f"info_parent_{uuid.uuid4().hex}"
+        file_name = "nested_file.txt"
+        dir_path = f"{TEST_HNS_BUCKET}/{parent}"
+        file_path = f"{dir_path}/{file_name}"
+
+        # touch implicitly creates folder if not already there
+        gcsfs.touch(file_path)
+
+        # verifies HNS overridden behaviour
+        info = gcsfs.info(dir_path)
+
+        assert info["type"] == "directory"
+        assert info["storageClass"] == "DIRECTORY"
+        assert info["name"].rstrip("/") == dir_path
+        # Verify HNS-specific metadata fields provided by _get_directory_info
+        assert "ctime" in info
+        assert "mtime" in info
+        assert "metageneration" in info
+        assert info["size"] == 0
+
+        # verifies HNS overridden behaviour
+        info = gcsfs.info(file_path)
+
+        assert info["type"] == "file"
+        assert info["name"] == file_path
+        assert info["size"] == 0
+
+    def test_hns_info_non_existent_path_raises(self, gcs_hns):
+        """Test info() raises FileNotFoundError for non-existent paths."""
+        gcsfs = gcs_hns
+        non_existent_path = f"{TEST_HNS_BUCKET}/non_existent_{uuid.uuid4().hex}"
+
+        # Should raise FileNotFoundError, mapping from api_exceptions.NotFound
+        with pytest.raises(FileNotFoundError):
+            gcsfs.info(non_existent_path)

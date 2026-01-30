@@ -3,13 +3,20 @@ import os
 import shlex
 import subprocess
 import time
+import uuid
+from unittest import mock
 
 import fsspec
 import pytest
+import pytest_asyncio
 import requests
 from google.cloud import storage
+from google.cloud.storage._experimental.asyncio.async_appendable_object_writer import (
+    AsyncAppendableObjectWriter,
+)
 
 from gcsfs import GCSFileSystem
+from gcsfs.extended_gcsfs import BucketType
 from gcsfs.tests.settings import (
     TEST_BUCKET,
     TEST_HNS_BUCKET,
@@ -65,6 +72,12 @@ c = TEST_BUCKET + "/tmp/test/c"
 d = TEST_BUCKET + "/tmp/test/d"
 
 params = dict()
+
+BUCKET_NAME_MAP = {
+    "regional": TEST_BUCKET,
+    "zonal": TEST_ZONAL_BUCKET,
+    "hns": TEST_HNS_BUCKET,
+}
 
 
 def stop_docker(container):
@@ -131,7 +144,12 @@ def buckets_to_delete():
 
 
 @pytest.fixture
-def gcs(gcs_factory, buckets_to_delete, populate=True):
+def populate_bucket():
+    return True
+
+
+@pytest.fixture
+def gcs(gcs_factory, buckets_to_delete, populate_bucket):
     gcs = gcs_factory()
     try:  # ensure we're empty.
         # Create the bucket if it doesn't exist, otherwise clean it.
@@ -146,7 +164,7 @@ def gcs(gcs_factory, buckets_to_delete, populate=True):
         else:
             _cleanup_gcs(gcs, bucket=TEST_BUCKET)
 
-        if populate:
+        if populate_bucket:
             gcs.pipe({TEST_BUCKET + "/" + k: v for k, v in allfiles.items()})
         gcs.invalidate_cache()
         yield gcs
@@ -155,11 +173,13 @@ def gcs(gcs_factory, buckets_to_delete, populate=True):
 
 
 @pytest.fixture
-def extended_gcs_factory(gcs_factory, buckets_to_delete, populate=True):
+def extended_gcs_factory(gcs_factory, buckets_to_delete, populate_bucket):
     created_instances = []
 
     def factory(**kwargs):
-        fs = _create_extended_gcsfs(gcs_factory, buckets_to_delete, populate, **kwargs)
+        fs = _create_extended_gcsfs(
+            gcs_factory, buckets_to_delete, populate_bucket, **kwargs
+        )
         created_instances.append(fs)
         return fs
 
@@ -170,8 +190,10 @@ def extended_gcs_factory(gcs_factory, buckets_to_delete, populate=True):
 
 
 @pytest.fixture
-def extended_gcsfs(gcs_factory, buckets_to_delete, populate=True):
-    extended_gcsfs = _create_extended_gcsfs(gcs_factory, buckets_to_delete, populate)
+def extended_gcsfs(gcs_factory, buckets_to_delete, populate_bucket):
+    extended_gcsfs = _create_extended_gcsfs(
+        gcs_factory, buckets_to_delete, populate_bucket
+    )
     try:
         yield extended_gcsfs
     finally:
@@ -182,7 +204,7 @@ def _cleanup_gcs(gcs, bucket=TEST_BUCKET):
     """Clean the bucket contents, logging a warning on failure."""
     try:
         if gcs.exists(bucket):
-            files_to_delete = gcs.find(bucket)
+            files_to_delete = gcs.find(bucket, withdirs=True)
             if files_to_delete:
                 gcs.rm(files_to_delete)
     except Exception as e:
@@ -291,7 +313,7 @@ def cleanup_versioned_bucket(gcs, bucket_name, prefix=None):
     logging.info("Successfully deleted %d object versions.", len(blobs_to_delete))
 
 
-def _create_extended_gcsfs(gcs_factory, buckets_to_delete, populate=True, **kwargs):
+def _create_extended_gcsfs(gcs_factory, buckets_to_delete, populate_bucket, **kwargs):
     is_real_gcs = (
         os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com"
     )
@@ -305,10 +327,24 @@ def _create_extended_gcsfs(gcs_factory, buckets_to_delete, populate=True, **kwar
             pass
         extended_gcsfs.mkdir(TEST_ZONAL_BUCKET)
         buckets_to_delete.add(TEST_ZONAL_BUCKET)
-        if populate:
-            extended_gcsfs.pipe(
-                {TEST_ZONAL_BUCKET + "/" + k: v for k, v in allfiles.items()}
-            )
+    try:
+        if populate_bucket:
+            # To avoid hitting object mutation limits, only pipe files if they
+            # don't exist or if their size has changed.
+            existing_files = extended_gcsfs.find(TEST_ZONAL_BUCKET, detail=True)
+            files_to_pipe = {}
+            for k, v in allfiles.items():
+                remote_path = f"{TEST_ZONAL_BUCKET}/{k}"
+                if remote_path not in existing_files or existing_files[remote_path][
+                    "size"
+                ] != len(v):
+                    files_to_pipe[remote_path] = v
+
+            if files_to_pipe:
+                extended_gcsfs.pipe(files_to_pipe, finalize_on_close=True)
+    except Exception as e:
+        logging.warning(f"Failed to populate Zonal bucket: {e}")
+
     extended_gcsfs.invalidate_cache()
     return extended_gcsfs
 
@@ -329,8 +365,7 @@ def gcs_hns(gcs_factory, buckets_to_delete):
     try:
         if not gcs.exists(TEST_HNS_BUCKET):
             # Note: Emulators may not fully support HNS features like real GCS.
-            # TODO: Update to create HNS bucket once mkdir supports creating HNS buckets.
-            gcs.mkdir(TEST_HNS_BUCKET)
+            gcs.mkdir(TEST_HNS_BUCKET, enable_hierarchial_namespace=True)
             buckets_to_delete.add(TEST_HNS_BUCKET)
         else:
             _cleanup_gcs(gcs, bucket=TEST_HNS_BUCKET)
@@ -338,3 +373,111 @@ def gcs_hns(gcs_factory, buckets_to_delete):
         yield gcs
     finally:
         _cleanup_gcs(gcs, bucket=TEST_HNS_BUCKET)
+
+
+@pytest.fixture
+def zonal_write_mocks():
+    """A fixture for mocking Zonal bucket write functionality."""
+
+    if os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com":
+        yield None
+        return
+
+    patch_target_get_bucket_type = (
+        "gcsfs.extended_gcsfs.ExtendedGcsFileSystem._get_bucket_type"
+    )
+    patch_target_init_aaow = "gcsfs.zb_hns_utils.init_aaow"
+    patch_target_gcsfs_info = "gcsfs.core.GCSFileSystem._info"
+
+    mock_aaow = mock.AsyncMock(spec=AsyncAppendableObjectWriter)
+    mock_aaow.offset = 0
+    mock_aaow._is_stream_open = True
+    mock_init_aaow = mock.AsyncMock(return_value=mock_aaow)
+    mock_gcsfs_info = mock.AsyncMock(
+        return_value={"generation": "12345", "type": "file", "name": "mock_file"}
+    )
+
+    async def append_side_effect(data):
+        mock_aaow.offset += len(data)
+
+    mock_aaow.append.side_effect = append_side_effect
+
+    async def close_side_effect(finalize_on_close=False):
+        mock_aaow._is_stream_open = False
+
+    mock_aaow.close.side_effect = close_side_effect
+
+    # Finalize closes the stream as well
+    async def finalize_side_effect():
+        mock_aaow._is_stream_open = False
+
+    mock_aaow.finalize.side_effect = finalize_side_effect
+
+    with (
+        mock.patch(
+            patch_target_get_bucket_type,
+            return_value=BucketType.ZONAL_HIERARCHICAL,
+        ),
+        mock.patch(patch_target_gcsfs_info, mock_gcsfs_info),
+        mock.patch(patch_target_init_aaow, mock_init_aaow),
+    ):
+        mocks = {
+            "aaow": mock_aaow,
+            "init_aaow": mock_init_aaow,
+            "_gcsfs_info": mock_gcsfs_info,
+        }
+        yield mocks
+
+
+@pytest.fixture
+def file_path():
+    """Generates a unique test file path for every test."""
+    path = f"{TEST_ZONAL_BUCKET}/zonal-test-{uuid.uuid4()}"
+    yield path
+
+
+@pytest_asyncio.fixture
+async def async_gcs():
+    """Fixture to provide an asynchronous GCSFileSystem instance."""
+    token = "anon" if not os.getenv("STORAGE_EMULATOR_HOST") else None
+    GCSFileSystem.clear_instance_cache()
+    gcs = GCSFileSystem(asynchronous=True, token=token)
+    yield gcs
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--run-benchmarks",
+        action="store_true",
+        default=False,
+        help="run benchmark tests",
+    )
+    parser.addoption(
+        "--run-benchmarks-infra",
+        action="store_true",
+        default=False,
+        help="run benchmark infrastructure tests",
+    )
+
+
+def pytest_ignore_collect(collection_path, config):
+    path_str = str(collection_path)
+
+    if "gcsfs/tests/perf/microbenchmarks" in path_str:
+        # If no benchmark flags are passed, ignore the entire directory immediately.
+        if not (
+            config.getoption("--run-benchmarks")
+            or config.getoption("--run-benchmarks-infra")
+        ):
+            return True
+
+        # If only --run-benchmarks-infra is passed, ignore the actual benchmark subfolders.
+        if config.getoption("--run-benchmarks-infra") and not config.getoption(
+            "--run-benchmarks"
+        ):
+            benchmark_subdirs = {"delete", "listing", "read", "rename", "write"}
+            path_parts = set(path_str.replace(os.sep, "/").split("/"))
+            if benchmark_subdirs.intersection(path_parts):
+                return True
+
+    return None

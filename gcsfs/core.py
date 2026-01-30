@@ -108,6 +108,10 @@ class UnclosableBytesIO(io.BytesIO):
         self.seek(0)
 
 
+def _gcp_universe_domain():
+    return os.getenv("GOOGLE_CLOUD_UNIVERSE_DOMAIN", "googleapis.com")
+
+
 def _location():
     """
     Resolves GCS HTTP location as http[s]://host
@@ -125,7 +129,8 @@ def _location():
         ):
             _emulator_location = f"http://{_emulator_location}"
         return _emulator_location
-    return "https://storage.googleapis.com"
+
+    return f"https://storage.{_gcp_universe_domain()}"
 
 
 def _chunks(lst, n):
@@ -345,6 +350,10 @@ class GCSFileSystem(asyn.AsyncFileSystem):
     @property
     def base(self):
         return f"{self._location}/storage/v1/"
+
+    @property
+    def batch_url_base(self):
+        return f"{self._location}/batch/storage/v1"
 
     @property
     def project(self):
@@ -609,7 +618,10 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                     raise
 
         items, prefixes = await self._do_list_objects(
-            path, prefix=prefix, versions=versions, **kwargs
+            path,
+            prefix=prefix,
+            versions=versions,
+            **kwargs,
         )
 
         pseudodirs = [
@@ -642,7 +654,13 @@ class GCSFileSystem(asyn.AsyncFileSystem):
         return out
 
     async def _do_list_objects(
-        self, path, max_results=None, delimiter="/", prefix="", versions=False, **kwargs
+        self,
+        path,
+        max_results=None,
+        delimiter="/",
+        prefix="",
+        versions=False,
+        **kwargs,
     ):
         """Object listing for the given {bucket}/{prefix}/ path."""
         bucket, _path, generation = self.split_path(path)
@@ -654,7 +672,8 @@ class GCSFileSystem(asyn.AsyncFileSystem):
         default_page_size = 5000
 
         # NOTE: the inventory report logic is experimental.
-        inventory_report_info = kwargs.get("inventory_report_info", None)
+        # removing inventory_report_info parameter to pass kwargs directly to list api
+        inventory_report_info = kwargs.pop("inventory_report_info", None)
 
         # Check if the user has configured inventory report option.
         if inventory_report_info is not None:
@@ -679,6 +698,7 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                 prefix=prefix,
                 versions=versions,
                 page_size=default_page_size,
+                **kwargs,
             )
 
         # If the user has not configured inventory report, proceed to use
@@ -692,10 +712,11 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                 prefix=prefix,
                 versions=versions,
                 max_results=max_results,
+                **kwargs,
             )
 
     async def _concurrent_list_objects_helper(
-        self, items, bucket, delimiter, prefix, versions, page_size
+        self, items, bucket, delimiter, prefix, versions, page_size, **kwargs
     ):
         """
         Lists objects using coroutines, using the object names from the inventory
@@ -745,6 +766,7 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                     prefix=prefix,
                     versions=versions,
                     max_results=page_size,
+                    **kwargs,
                 )
                 for i in range(0, len(start_offsets))
             ]
@@ -771,6 +793,7 @@ class GCSFileSystem(asyn.AsyncFileSystem):
         versions,
         max_results,
         items_per_call=1000,
+        **kwargs,
     ):
         """
         Sequential list objects within the start and end offset range.
@@ -790,6 +813,7 @@ class GCSFileSystem(asyn.AsyncFileSystem):
             maxResults=num_items,
             json_out=True,
             versions="true" if versions else None,
+            **kwargs,
         )
 
         prefixes.extend(page.get("prefixes", []))
@@ -1040,6 +1064,12 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                 return exact
         except FileNotFoundError:
             pass
+        return await self._get_directory_info(path, bucket, key, generation)
+
+    async def _get_directory_info(self, path, bucket, key, generation):
+        """
+        Internal method to check if a path is a directory by listing objects.
+        """
         out = await self._list_objects(path, max_results=1)
         exact = next((o for o in out if o["name"].rstrip("/") == path), None)
         if exact and not _is_directory_marker(exact):
@@ -1250,6 +1280,8 @@ class GCSFileSystem(asyn.AsyncFileSystem):
         bucket, key, generation = self.split_path(path)
         if key:
             await self._call("DELETE", "b/{}/o/{}", bucket, key, generation=generation)
+            # TODO: This can be optimized for HNS buckets by not invalidating the entire parent
+            # directory structure from cache but to just remove the deleted file entry from immediate parent's cache.
             self.invalidate_cache(posixpath.dirname(self._strip_protocol(path)))
         else:
             await self._rmdir(path)
@@ -1294,7 +1326,7 @@ class GCSFileSystem(asyn.AsyncFileSystem):
             body = "".join(parts)
             headers, content = await self._call(
                 "POST",
-                f"{self._location}/batch/storage/v1",
+                self.batch_url_base,
                 headers={
                     "Content-Type": 'multipart/mixed; boundary="=========='
                     '=====7330845974216740156=="'
@@ -1333,15 +1365,13 @@ class GCSFileSystem(asyn.AsyncFileSystem):
 
     @property
     def on_google(self):
-        return "torage.googleapis.com" in self._location
+        return f"torage.{_gcp_universe_domain()}" in self._location
 
-    async def _rm(self, path, recursive=False, maxdepth=None, batchsize=20):
-        paths = await self._expand_path(path, recursive=recursive, maxdepth=maxdepth)
-        files = [p for p in paths if self.split_path(p)[1]]
-        dirs = [p for p in paths if not self.split_path(p)[1]]
+    async def _delete_files(self, files, batchsize):
+        """Helper to delete files in batches."""
         if self.on_google:
             # emulators do not support batch
-            exs = sum(
+            return sum(
                 await asyn._run_coros_in_chunks(
                     [
                         self._rm_files(files[i : i + batchsize])
@@ -1352,9 +1382,15 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                 [],
             )
         else:
-            exs = await asyn._run_coros_in_chunks(
+            return await asyn._run_coros_in_chunks(
                 [self._rm_file(f) for f in files], return_exceptions=True, batch_size=5
             )
+
+    async def _rm(self, path, recursive=False, maxdepth=None, batchsize=20):
+        paths = await self._expand_path(path, recursive=recursive, maxdepth=maxdepth)
+        files = [p for p in paths if self.split_path(p)[1]]
+        dirs = [p for p in paths if not self.split_path(p)[1]]
+        exs = await self._delete_files(files, batchsize)
 
         # buckets
         exs.extend(
@@ -1534,6 +1570,7 @@ class GCSFileSystem(asyn.AsyncFileSystem):
         prefix="",
         versions=False,
         maxdepth=None,
+        update_cache=True,
         **kwargs,
     ):
         path = self._strip_protocol(path)
@@ -1560,21 +1597,73 @@ class GCSFileSystem(asyn.AsyncFileSystem):
         else:
             _prefix = prefix
 
-        dirs = {}
-        cache_entries = {}
         path2 = path.rstrip("/") + "/"
 
         if not prefix:
             objects = [
                 o for o in objects if o["name"].startswith(path2) or o["name"] == path
             ]
+
+        dirs = self._get_dirs_and_update_cache(
+            path, objects, prefix=prefix, update_cache=update_cache
+        )
+
+        if withdirs:
+            objects = sorted(objects + list(dirs.values()), key=lambda x: x["name"])
+
+        if maxdepth:
+            # Filter returned objects based on requested maxdepth
+            depth = path.rstrip("/").count("/") + maxdepth
+            objects = list(filter(lambda o: o["name"].count("/") <= depth, objects))
+
+        if detail:
+            if versions:
+                return {f"{o['name']}#{o['generation']}": o for o in objects}
+            return {o["name"]: o for o in objects}
+
+        if versions:
+            return [f"{o['name']}#{o['generation']}" for o in objects]
+        return [o["name"] for o in objects]
+
+    def _get_dirs_and_update_cache(self, path, objects, prefix="", update_cache=True):
+        """
+        Populates the directory cache from a list of object details.
+
+        This method reconstructs the directory hierarchy from a flat list
+        of objects and update the cache, which improves the performance of
+        subsequent `ls` calls.
+
+        Parameters
+        ----------
+        path: str
+            The root path of the find operation.
+        objects: list[dict]
+            A list of objects from which directories are extracted and cache is updated.
+        prefix: str
+            If a prefix is provided, the directory cache will *not* be updated,
+            as the object list is considered partial.
+        update_cache: bool
+            Cache won't be updated if update_cache is False.
+
+        Returns
+        -------
+        dict: A dictionary of all pseudo-directory entries created.
+        """
+        dirs = {}
+        cache_entries = {}
+
         for obj in objects:
+            # For native HNS empty folders, which are returned as directory types
+            # but are not placeholders, we need to ensure they have an entry in the cache.
+            if obj.get("type") == "directory":
+                cache_entries.setdefault(obj["name"], {})
+
             parent = self._parent(obj["name"])
             previous = obj
 
             while parent:
                 dir_key = self.split_path(parent)[1]
-                if not dir_key or len(parent) < len(path):
+                if not dir_key or len(parent) < len(path.rstrip("/")):
                     break
 
                 dirs[parent] = {
@@ -1593,27 +1682,10 @@ class GCSFileSystem(asyn.AsyncFileSystem):
 
                 previous = dirs[parent]
                 parent = self._parent(parent)
-
-        if not prefix:
+        if not prefix and update_cache:
             cache_entries_list = {k: list(v.values()) for k, v in cache_entries.items()}
             self.dircache.update(cache_entries_list)
-
-        if withdirs:
-            objects = sorted(objects + list(dirs.values()), key=lambda x: x["name"])
-
-        if maxdepth:
-            # Filter returned objects based on requested maxdepth
-            depth = path.rstrip("/").count("/") + maxdepth
-            objects = list(filter(lambda o: o["name"].count("/") <= depth, objects))
-
-        if detail:
-            if versions:
-                return {f"{o['name']}#{o['generation']}": o for o in objects}
-            return {o["name"]: o for o in objects}
-
-        if versions:
-            return [f"{o['name']}#{o['generation']}" for o in objects]
-        return [o["name"] for o in objects]
+        return dirs
 
     @retry_request(retries=retries)
     async def _get_file_request(

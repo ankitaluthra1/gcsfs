@@ -1,0 +1,24 @@
+common:
+  bucket_types:
+    - "regional"
+    - "zonal"
+  file_sizes_mb:
+    - 1024 # 1GB
+  block_sizes_mb:
+    - 1
+  rounds: 3
+
+scenarios:
+  - name: "read_seq"
+    pattern: "seq"
+
+  - name: "read_seq_multi_process"
+    pattern: "seq"
+    processes: [16,40,96,144]
+
+  - name: "read_rand"
+    pattern: "rand"
+
+  - name: "read_rand_multi_process"
+    pattern: "rand"
+    processes: [16,40,96,144]

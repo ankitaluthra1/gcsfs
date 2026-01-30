@@ -10,3 +10,8 @@ TEST_KMS_KEY = os.getenv(
     "GCSFS_TEST_KMS_KEY",
     f"projects/{TEST_PROJECT}/locations/us/keyRings/gcsfs_test/cryptKeys/gcsfs_test_key",
 )
+
+# =============================================================================
+# Performance Benchmark Settings
+# =============================================================================
+BENCHMARK_FILTER = os.environ.get("GCSFS_BENCHMARK_FILTER", "")
