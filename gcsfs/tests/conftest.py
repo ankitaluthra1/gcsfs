@@ -476,6 +476,7 @@ def pytest_ignore_collect(collection_path, config):
             "--run-benchmarks"
         ):
             benchmark_subdirs = {"delete", "listing", "read", "rename", "write"}
+            benchmark_subdirs = {"delete", "listing", "read", "rename", "write", "cat_ranges"}
             path_parts = set(path_str.replace(os.sep, "/").split("/"))
             if benchmark_subdirs.intersection(path_parts):
                 return True
@@ -486,8 +487,36 @@ def pytest_ignore_collect(collection_path, config):
         ):
             if os.path.basename(path_str).startswith("test_"):
                 benchmark_subdirs = {"delete", "listing", "read", "rename", "write"}
+                benchmark_subdirs = {"delete", "listing", "read", "rename", "write", "cat_ranges"}
                 path_parts = set(path_str.replace(os.sep, "/").split("/"))
                 if not benchmark_subdirs.intersection(path_parts):
                     return True
 
     return None
+
+@pytest.fixture(scope="function")
+def gcsfs_benchmark_cat_ranges(extended_gcs_factory, request):
+    params = request.param
+    gcs = extended_gcs_factory()
+
+    # Create files
+    file_paths = []
+    data = b"x" * params.file_size_bytes
+
+    # We use a prefix to avoid collisions
+    prefix = f"{params.bucket_name}/bench_cat_ranges_{uuid.uuid4()}"
+
+    files_data = {}
+    for i in range(params.files):
+        fn = f"{prefix}/file_{i}"
+        files_data[fn] = data
+        file_paths.append(fn)
+
+    gcs.pipe(files_data)
+
+    yield gcs, file_paths, params
+
+    try:
+        gcs.rm(file_paths)
+    except Exception:
+        pass

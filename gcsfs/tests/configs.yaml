@@ -1,0 +1,9 @@
+scenarios:
+  - name: single_file
+    num_ranges: [100]
+    range_sizes_kb: [1]
+    files: 1
+  - name: multi_file
+    num_ranges: [50]
+    range_sizes_kb: [1]
+    files: 50
