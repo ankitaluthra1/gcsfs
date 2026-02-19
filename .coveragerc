@@ -4,6 +4,7 @@ include =
 
 omit =
     */test_*.py
+    */conftest.py
 
 [report]
 show_missing = True
