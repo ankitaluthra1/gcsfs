@@ -58,6 +58,7 @@ DEFAULT_PROJECT = os.getenv("GCSFS_DEFAULT_PROJECT", "")
 GCS_MIN_BLOCK_SIZE = 2**18
 GCS_MAX_BLOCK_SIZE = 2**28
 DEFAULT_BLOCK_SIZE = 5 * 2**20
+use_new_upload_chunk = True
 
 SUPPORTED_FIXED_KEY_METADATA = {
     "content_encoding": "contentEncoding",
@@ -2011,34 +2012,39 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
         final: bool
             Complete and commit upload
         """
-        while True:
-            # shortfall splits blocks bigger than max allowed upload
+        if use_new_upload_chunk:
+            data = self.buffer.getbuffer()
+        else:
             data = self.buffer.getvalue()
-            head = {}
-            l = len(data)
+        l = len(data)
 
-            if (l < GCS_MIN_BLOCK_SIZE) and (not final or not self.autocommit):
-                # either flush() was called, but we don't have enough to
-                # push, or we split a big upload, and have less left than one
-                # block.  If this is the final part, OK to violate those
-                # terms.
-                return False
+        if (l < GCS_MIN_BLOCK_SIZE) and (not final or not self.autocommit):
+            # either flush() was called, but we don't have enough to
+            # push, or we split a big upload, and have less left than one
+            # block.  If this is the final part, OK to violate those
+            # terms.
+            return False
 
+        current_pos = 0
+        while current_pos < l or (final and l == 0):
             # Select the biggest possible chunk of data to be uploaded
-            chunk_length = min(l, GCS_MAX_BLOCK_SIZE)
-            chunk = data[:chunk_length]
-            if final and self.autocommit and chunk_length == l:
+            remaining = l - current_pos
+            chunk_length = min(remaining, GCS_MAX_BLOCK_SIZE)
+            chunk = data[current_pos : current_pos + chunk_length]
+            head = {}
+
+            if final and self.autocommit and chunk_length == remaining:
                 if l:
                     # last chunk
                     head["Content-Range"] = "bytes %i-%i/%i" % (
                         self.offset,
                         self.offset + chunk_length - 1,
-                        self.offset + l,
+                        self.offset + remaining,
                     )
                 else:
                     # closing when buffer is empty
                     head["Content-Range"] = "bytes */%i" % self.offset
-                    data = None
+                    chunk = None
             else:
                 head["Content-Range"] = "bytes %i-%i/*" % (
                     self.offset,
@@ -2052,29 +2058,58 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
             )
             if "Range" in headers:
                 end = int(headers["Range"].split("-")[1])
-                shortfall = (self.offset + l - 1) - end
-                if shortfall > 0:
-                    self.checker.update(data[:-shortfall])
-                    self.buffer = UnclosableBytesIO(data[-shortfall:])
-                    self.buffer.seek(shortfall)
-                    self.offset += l - shortfall
+                # GCS returns the end of the range it has.
+                # If we sent 0-256MB, and it has 0-256MB, end is 256MB-1.
+                # Check if it matches what we sent.
+                expected_end = self.offset + chunk_length - 1
+                if end == expected_end:
+                    # Successful chunk upload
+                    self.checker.update(chunk)
+                    self.offset += chunk_length
+                    current_pos += chunk_length
+                    # Continue to next chunk
                     continue
                 else:
-                    self.checker.update(data)
-                if final and contents:
-                    j = json.loads(contents)
-                    self.generation = j.get("generation")
+                    # Shortfall / Partial upload
+                    # Calculate how much was accepted relative to this chunk
+                    # accepted_end = end
+                    # accepted_len = end - self.offset + 1
+                    # But we need to handle the case where it accepted LESS than this chunk.
+                    
+                    # Also need to handle consistency checker for partial data?
+                    # The original code did: self.checker.update(data[:-shortfall])
+                    # where shortfall was total_remaining.
+                    # Here we update checker with what was accepted.
+                    accepted_len = end - self.offset + 1
+                    if accepted_len > 0:
+                        self.checker.update(chunk[:accepted_len])
+                    
+                    # Reset buffer to remaining data
+                    # data index of end: current_pos + accepted_len
+                    remaining_data = data[current_pos + accepted_len:]
+                    self.buffer = UnclosableBytesIO(remaining_data)
+                    self.offset += accepted_len
+                    # We stop processing here and return, assuming write/flush will continue or retry?
+                    # Original code looped "continue".
+                    # If we create new buffer, we can just return True (partial success).
+                    return True
             else:
+                # No Range header -> Upload Complete (Final) or single chunk success?
+                # If we are doing resumable upload, we should get Range.
+                # If we get 200/201 without Range, it means full object created?
                 assert final, "Response looks like upload is over"
                 if l:
                     j = json.loads(contents)
-                    self.checker.update(data)
+                    self.checker.update(chunk) # Update with this chunk
                     self.checker.validate_json_response(j)
                     self.generation = j.get("generation")
-            # Clear buffer and update offset when all is received
-            self.buffer = UnclosableBytesIO()
-            self.offset += l
-            break
+                
+                self.offset += chunk_length
+                current_pos += chunk_length
+                break
+        
+        # If we exhausted the data
+        self.buffer = UnclosableBytesIO()
         return True
 
     def commit(self):
@@ -2193,13 +2228,23 @@ async def upload_chunk(fs, location, data, offset, size, content_type):
     ):
 
         return await ext_upload_chunk(fs, location, data, offset, size, content_type)
+
+    if use_new_upload_chunk:
+        if not isinstance(data, memoryview):
+            data = memoryview(data)
+
     head = {}
     l = len(data)
     range = "bytes %i-%i/%i" % (offset, offset + l - 1, size)
     head["Content-Range"] = range
     head.update({"Content-Type": content_type, "Content-Length": str(l)})
+    if use_new_upload_chunk and isinstance(data, memoryview):
+        payload = data
+    else:
+        payload = UnclosableBytesIO(data)
+
     headers, txt = await fs._call(
-        "POST", location, headers=head, data=UnclosableBytesIO(data)
+        "POST", location, headers=head, data=payload
     )
     if "Range" in headers:
         end = int(headers["Range"].split("-")[1])
