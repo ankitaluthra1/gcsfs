@@ -5,6 +5,7 @@ include =
 omit =
     */test_*.py
     */conftest.py
+    .coveragerc
 
 [report]
 show_missing = True
