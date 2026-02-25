@@ -2054,6 +2054,54 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
         """HTTP link to this file's data"""
         return self.fs.url(self.path)
 
+    def write(self, data):
+        if self.closed:
+            raise ValueError("I/O operation on closed file")
+        if not data:
+            return 0
+
+        # Optimization for large writes
+        if len(data) >= self.blocksize and os.environ.get("GCSFS_OPTIMIZED_WRITE", "false").lower() == "true":
+            if self.buffer.tell() > 0:
+                self.flush()
+            if self.location is None:
+                self._initiate_upload()
+
+            # Initialize offset if needed
+            if getattr(self, "offset", None) is None:
+                self.offset = 0
+
+            chunksize = GCS_MAX_BLOCK_SIZE
+            mv = memoryview(data)
+            n = len(data)
+            offset = 0
+
+            while offset < n:
+                remaining = n - offset
+                if remaining >= chunksize:
+                    chunk = mv[offset : offset + chunksize]
+                    # Direct upload of chunk
+                    self.buffer = UnclosableBytesIO(chunk)
+                    self._upload_chunk(final=False)
+
+                    # Handle shortfall/buffer state
+                    if self.buffer.getvalue():
+                        # Buffer has data (shortfall). Append rest of data to buffer
+                        self.buffer.write(mv[offset + chunksize :])
+                        break
+
+                    offset += chunksize
+                else:
+                    # Buffer remainder
+                    self.buffer.write(mv[offset:])
+                    if self.buffer.tell() >= self.blocksize:
+                        self.flush()
+                    break
+
+            return n
+        else:
+            return super().write(data)
+
     def _upload_chunk(self, final=False):
         """Write one part of a multi-block file upload
 
