@@ -55,7 +55,7 @@ b = TEST_ZONAL_BUCKET + "/zonal/test/b"
 c = TEST_ZONAL_BUCKET + "/zonal/test/c"
 
 # If the condition is True, only then tests in this file are run.
-should_run = os.getenv(REQUIRED_ENV_VAR, "false").lower() in (
+should_run = os.getenv(REQUIRED_ENV_VAR, "true").lower() in (
     "true",
     "1",
 )
