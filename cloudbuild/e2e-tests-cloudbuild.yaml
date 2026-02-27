@@ -135,7 +135,7 @@ steps:
 
   # Run standard tests with HNS ZB support to test fallback (in parallel with other tests).
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-    id: "run-standard-tests"
+    id: "run-standard-tests-with-fallback"
     entrypoint: "bash"
     args:
       - "-c"
@@ -253,6 +253,7 @@ steps:
         wait
     waitFor:
       - "run-standard-tests"
+      - "run-standard-tests-with-fallback"
       - "run-zonal-tests"
       - "run-hns-tests"
 
