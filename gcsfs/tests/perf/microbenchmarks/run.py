@@ -41,7 +41,6 @@ def _setup_environment(args):
         args.zonal_bucket if args.zonal_bucket else ""
     )
     os.environ["GCSFS_HNS_TEST_BUCKET"] = args.hns_bucket if args.hns_bucket else ""
-    # os.environ["GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT"] = "true"
     os.environ["STORAGE_EMULATOR_HOST"] = "https://storage.googleapis.com"
 
     if args.config:

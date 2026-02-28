@@ -21,7 +21,6 @@ def test_setup_environment_success():
         assert os.environ["GCSFS_ZONAL_TEST_BUCKET"] == "zonal"
         assert os.environ["GCSFS_HNS_TEST_BUCKET"] == "hns"
         assert os.environ["GCSFS_BENCHMARK_FILTER"] == "conf1"
-        assert os.environ["GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT"] == "true"
 
 
 def test_setup_environment_missing_buckets():
