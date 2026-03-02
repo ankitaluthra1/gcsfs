@@ -143,7 +143,7 @@ steps:
         TEST_SCRIPT="
           source env/bin/activate && \
           echo '--- Preparing test environment for standard tests ---' && \
-          export GCSFS_TEST_BUCKET='gcsfs-test-standard-${_SHORT_BUILD_ID}' && \
+          export GCSFS_TEST_BUCKET='gcsfs-test-fallback-standard-${_SHORT_BUILD_ID}' && \
           export GCSFS_TEST_VERSIONED_BUCKET='gcsfs-test-versioned-${_SHORT_BUILD_ID}' && \
           export STORAGE_EMULATOR_HOST=https://storage.googleapis.com && \
           export GCSFS_TEST_PROJECT=${PROJECT_ID} && \

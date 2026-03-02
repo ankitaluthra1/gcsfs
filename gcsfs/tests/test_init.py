@@ -50,7 +50,7 @@ class TestConditionalImport:
             gcsfs.GCSFileSystem is gcsfs.extended_gcsfs.ExtendedGcsFileSystem
         ), "Should be ExtendedGcsFileSystem"
 
-    def test_experimental_env_set(self):
+    def test_experimental_env_set_to_false(self):
         """
         Tests gcsfs.GCSFileSystem is extended_gcsfs.ExtendedGcsFileSystem when
         GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT IS set to false.
