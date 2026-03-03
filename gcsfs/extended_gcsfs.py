@@ -942,6 +942,38 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
     rm = asyn.sync_wrapper(_rm)
 
+    async def _size(self, path):
+        """Get the size of a file in bytes.
+
+        For Zonal buckets, this method is optimized to use gRPC and the
+        `persisted_size` attribute from `AsyncMultiRangeDownloader`.
+        For other bucket types, it falls back to the default `_info()` method.
+
+        Parameters
+        ----------
+        path: str
+            The full GCS path to the file.
+        """
+        bucket, key, generation = self.split_path(path)
+        is_zonal = await self._is_zonal_bucket(bucket)
+
+        if is_zonal is False:
+            return (await self._info(path))["size"]
+
+        mrd = None
+        try:
+            await self._get_grpc_client()
+            mrd = await AsyncMultiRangeDownloader.create_mrd(
+                self.grpc_client, bucket, key, generation
+            )
+            size = mrd.persisted_size
+            if size is None:
+                size = (await self._info(path))["size"]
+            return size
+        finally:
+            if mrd:
+                await mrd.close()
+
     async def _find(
         self,
         path,
