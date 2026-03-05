@@ -10,6 +10,7 @@ import mimetypes
 import os
 import posixpath
 import re
+import time
 import uuid
 import warnings
 import weakref
@@ -1080,10 +1081,25 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                 "storageClass": "DIRECTORY",
                 "type": "directory",
             }
+
         # Check both exact file path and directory info in parellel to distinguish file, directory, or not found
+        async def measured_get_object():
+            t0 = time.perf_counter()
+            res = await self._get_object(path)
+            dt = time.perf_counter() - t0
+            logger.info(f"Latency _get_object({path}): {dt*1000:.2f} ms")
+            return res
+
+        async def measured_get_directory_info():
+            t0 = time.perf_counter()
+            res = await self._get_directory_info(path, bucket, key, generation)
+            dt = time.perf_counter() - t0
+            logger.info(f"Latency _get_directory_info({path}): {dt*1000:.2f} ms")
+            return res
+
         results = await asyncio.gather(
-            self._get_object(path),
-            self._get_directory_info(path, bucket, key, generation),
+            measured_get_object(),
+            measured_get_directory_info(),
             return_exceptions=True,
         )
         exact, dir_info = results
