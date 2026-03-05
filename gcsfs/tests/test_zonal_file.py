@@ -1,5 +1,6 @@
 """Tests for ZonalFile write operations."""
 
+import contextlib
 import os
 from unittest import mock
 
@@ -8,8 +9,10 @@ from google.cloud.storage.asyncio.async_appendable_object_writer import (
     _DEFAULT_FLUSH_INTERVAL_BYTES,
 )
 
+from gcsfs.caching import Prefetcher
 from gcsfs.tests.settings import TEST_ZONAL_BUCKET
 from gcsfs.tests.utils import tempdir, tmpfile
+from gcsfs.zonal_file import ZonalFile
 
 test_data = b"hello world"
 
@@ -474,3 +477,89 @@ class TestZonalFileRealGCS:
 
         extended_gcsfs.pipe(remote_path, overwrite_data, finalize_on_close=True)
         assert extended_gcsfs.cat(remote_path) == overwrite_data
+
+
+@pytest.fixture
+def mock_gcsfs():
+    fs = mock.Mock()
+    fs._split_path.return_value = ("test-bucket", "test-key", "123")
+    fs.split_path.return_value = ("test-bucket", "test-key", "123")
+    fs.info.return_value = {"size": 1000, "generation": "123", "name": "test-key"}
+    fs.loop = mock.Mock()
+    return fs
+
+
+def test_zonal_file_prefetcher_initialization(mock_gcsfs):
+    """Test that setting cache_type to 'prefetcher' injects the logical chunk fetcher."""
+
+    with (
+        mock.patch("gcsfs.zonal_file.MRDPool") as mrd_pool_mock,
+        mock.patch("gcsfs.zonal_file.asyn.sync"),
+    ):
+
+        mrd_pool_instance = mock.Mock()
+        mrd_pool_instance.persisted_size = 1000
+        mrd_pool_mock.return_value = mrd_pool_instance
+
+        cache_options = {"concurrency": 2}
+
+        zf = ZonalFile(
+            gcsfs=mock_gcsfs,
+            path="gs://test-bucket/test-key",
+            mode="rb",
+            cache_type="prefetcher",
+            cache_options=cache_options,
+        )
+
+        assert zf.pool_size == 4
+        assert zf.cache.name == Prefetcher.name
+        assert zf.cache.size == 1000
+
+        zf.close()
+
+
+@pytest.mark.asyncio
+async def test_fetch_logical_chunk_split_logic(mock_gcsfs):
+    """Test that chunks larger than 16MB are split correctly."""
+
+    with (
+        mock.patch("gcsfs.zonal_file.MRDPool"),
+        mock.patch("gcsfs.zonal_file.asyn.sync"),
+        mock.patch("gcsfs.zonal_file.DirectMemmoveBuffer"),
+    ):
+
+        zf = ZonalFile(gcsfs=mock_gcsfs, path="gs://test-bucket/test-key", mode="rb")
+        zf.pool_size = 4
+
+        zf.mrd_pool = mock.Mock()
+        zf.gcsfs.memmove_executor = mock.Mock()
+
+        mrd_mock = mock.AsyncMock()
+
+        @contextlib.asynccontextmanager
+        async def fake_get_mrd():
+            yield mrd_mock
+
+        zf.mrd_pool.get_mrd = fake_get_mrd
+
+        total_size = 32 * 1024 * 1024
+        await zf._fetch_logical_chunk(
+            start_offset=0, total_size=total_size, split_factor=2
+        )
+
+        # Assert the split logic directly on the downloader mock
+        assert mrd_mock.download_ranges.call_count == 2
+
+        # Sort calls by offset to ensure consistent assertions (tasks can run in any order)
+        calls = mrd_mock.download_ranges.call_args_list
+        args = [c[0][0][0] for c in calls]  # extracts the (offset, size, buffer) tuple
+        args.sort(key=lambda x: x[0])
+
+        assert args[0][0] == 0  # Offset 1
+        assert args[0][1] == 16 * 1024 * 1024  # Size 1
+
+        assert args[1][0] == 16 * 1024 * 1024  # Offset 2
+        assert args[1][1] == 16 * 1024 * 1024  # Size 2
+
+        # Explicitly close while asyn.sync is still mocked
+        zf.close()

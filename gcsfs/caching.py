@@ -1,5 +1,7 @@
+import asyncio
 from collections import deque
 
+import fsspec.asyn
 from fsspec.caching import BaseCache, register_cache
 
 
@@ -118,4 +120,244 @@ class ReadAheadChunked(BaseCache):
         return b"".join(parts)
 
 
-register_cache(ReadAheadChunked, clobber=True)
+class Prefetcher(BaseCache):
+    """
+    Asynchronous prefetching cache that reads ahead.
+
+    This cache spawns a background producer task that fetches sequential
+    blocks of data before they are explicitly requested. It is highly optimized
+    for sequential reads but can recover from arbitrary seeks by restarting
+    the prefetch loop.
+
+    Parameters
+    ----------
+    blocksize : int
+        Base size of the chunks to read ahead, in bytes.
+    fetcher : Callable
+        A coroutine of the form `f(start, end)` which gets bytes from the remote.
+    size : int
+        Total size of the file being read.
+    max_prefetch_size : int, optional
+        Maximum bytes to prefetch ahead of the current user offset.
+        Defaults to `max(2 * blocksize, 128MB)`.
+    concurrency : int, optional
+        Number of concurrent network requests to use for large chunks. Defaults to 4.
+    """
+
+    name = "prefetcher"
+
+    MIN_CHUNK_SIZE = 16 * 1024 * 1024
+    DEFAULT_PREFETCH_SIZE = 128 * 1024 * 1024
+
+    def __init__(
+        self,
+        blocksize: int,
+        fetcher,
+        size: int,
+        max_prefetch_size=None,
+        concurrency=4,
+        **kwargs,
+    ):
+        super().__init__(blocksize, fetcher, size)
+        self.fetcher = kwargs.pop("fetcher_override", self.fetcher)
+        self.concurrency = concurrency
+        self.max_prefetch_size = max(
+            max_prefetch_size or 0, 2 * self.blocksize, self.DEFAULT_PREFETCH_SIZE
+        )
+
+        self.sequential_streak = 0
+        self.user_offset = 0
+        self.current_offset = 0
+        self.queue = asyncio.Queue()
+        self.is_stopped = False
+        self._active_tasks = set()
+        self._wakeup_producer = asyncio.Event()
+        self._remainder = b""
+        self._buffer_offset = 0
+        self.loop = fsspec.asyn.get_loop()
+
+        async def _start_producer():
+            self._producer_task = asyncio.create_task(self._producer_loop())
+
+        fsspec.asyn.sync(self.loop, _start_producer)
+
+    async def _cancel_all_tasks(self, wait=False):
+        self.is_stopped = True
+        self._wakeup_producer.set()
+
+        tasks_to_wait = []
+
+        if hasattr(self, "_producer_task") and isinstance(
+            self._producer_task, asyncio.Task
+        ):
+            if not self._producer_task.done():
+                self._producer_task.cancel()
+                tasks_to_wait.append(self._producer_task)
+
+        for task in list(self._active_tasks):
+            if not task.done():
+                tasks_to_wait.append(task)
+
+        self._active_tasks.clear()
+        if hasattr(self, "queue"):
+            while not self.queue.empty():
+                try:
+                    self.queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+
+        if wait and tasks_to_wait:
+            await asyncio.gather(*tasks_to_wait, return_exceptions=True)
+
+    async def _restart_producer(self):
+        # Cancel old tasks without waiting
+        await self._cancel_all_tasks(wait=False)
+        self.is_stopped = False
+        self.sequential_streak = 0
+        self._producer_task = asyncio.create_task(self._producer_loop())
+
+    async def _producer_loop(self):
+        try:
+            while not self.is_stopped:
+                await self._wakeup_producer.wait()
+                self._wakeup_producer.clear()
+
+                if self.is_stopped:
+                    break
+
+                prefetch_size = min(
+                    (self.sequential_streak + 1) * self.blocksize,
+                    self.max_prefetch_size,
+                )
+
+                while (
+                    self.current_offset - self.user_offset
+                ) < prefetch_size and self.current_offset < self.size:
+                    actual_size = min(self.blocksize, self.size - self.current_offset)
+                    if self.sequential_streak < 2:
+                        sfactor = (
+                            self.concurrency
+                            if actual_size >= self.MIN_CHUNK_SIZE
+                            else min(self.concurrency, 2)
+                        )  # random usecase
+                    else:
+                        sfactor = (
+                            min(
+                                self.concurrency,
+                                max(1, actual_size // self.MIN_CHUNK_SIZE),
+                            )
+                            if actual_size >= self.MIN_CHUNK_SIZE
+                            else 1
+                        )  # sequential usecase
+
+                    download_task = asyncio.create_task(
+                        self.fetcher(
+                            self.current_offset, actual_size, split_factor=sfactor
+                        )
+                    )
+                    self._active_tasks.add(download_task)
+                    download_task.add_done_callback(self._active_tasks.discard)
+
+                    await self.queue.put(download_task)
+                    self.current_offset += actual_size
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            await self.queue.put(e)
+            self.is_stopped = True
+
+    async def read(self):
+        """Reads the next chunk from the object."""
+        if self.user_offset >= self.size:
+            return b""
+        if self.is_stopped and self.queue.empty():
+            return b""
+
+        if self.queue.empty():
+            self._wakeup_producer.set()
+
+        task = await self.queue.get()
+
+        # Check if the producer pushed an exception
+        if isinstance(task, Exception):
+            self.is_stopped = True
+            raise task
+
+        if task.done():
+            self.hit_count += 1
+        else:
+            self.miss_count += 1
+
+        try:
+            block = await task
+            self.user_offset += len(block)
+            self.sequential_streak += 1
+            if self.sequential_streak >= 2:
+                self._wakeup_producer.set()  # starts prefetching.
+            return block
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self.is_stopped = True
+            raise e
+
+    async def seek(self, new_offset):
+        if new_offset == self.user_offset:
+            return
+
+        self.user_offset = new_offset
+        self.current_offset = new_offset
+        await self._restart_producer()
+
+    async def _async_fetch(self, start, end):
+        if start != self._buffer_offset:
+            self._remainder = b""
+            self._buffer_offset = start
+            await self.seek(start)
+
+        requested_size = end - start
+        chunks = []
+        collected = 0
+
+        # Take any leftover bytes from a previous misaligned fetch
+        if self._remainder:
+            chunks.append(self._remainder)
+            collected += len(self._remainder)
+
+        while collected < requested_size and self.user_offset < self.size:
+            block = await self.read()
+            if not block:
+                break
+            chunks.append(block)
+            collected += len(block)
+
+        if len(chunks) == 1 and len(chunks[0]) == requested_size:
+            out = chunks[0]
+            self._remainder = b""
+        else:
+            full_data = b"".join(chunks)
+            out = full_data[:requested_size]
+            self._remainder = full_data[requested_size:]
+
+        self._buffer_offset += len(out)
+
+        self.total_requested_bytes += len(out)
+        return out
+
+    def _fetch(self, start: int | None, stop: int | None) -> bytes:
+        if start is None:
+            start = 0
+        if stop is None:
+            stop = self.size
+        if start >= self.size or start >= stop:
+            return b""
+        return fsspec.asyn.sync(self.loop, self._async_fetch, start, stop)
+
+    def close(self):
+        """Clean shutdown. Cancels tasks and waits for them to abort."""
+        fsspec.asyn.sync(self.loop, self._cancel_all_tasks, True)
+
+
+for gcs_cache in [ReadAheadChunked, Prefetcher]:
+    register_cache(gcs_cache, clobber=True)
