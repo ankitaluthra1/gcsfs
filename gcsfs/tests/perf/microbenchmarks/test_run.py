@@ -31,8 +31,9 @@ def test_setup_environment_missing_buckets():
 
 
 @mock.patch("subprocess.run")
-def test_run_benchmarks(mock_subprocess):
-    args = argparse.Namespace(group="read", log="true", log_level="INFO")
+@mock.patch("os.path.isdir", return_value=True)
+def test_run_benchmarks(mock_isdir, mock_subprocess):
+    args = argparse.Namespace(group="read_fixed_duration", log="true", log_level="INFO")
     results_dir = "/tmp/results"
 
     expected_json_path = os.path.join(results_dir, "results.json")
@@ -53,7 +54,7 @@ def test_run_benchmarks(mock_subprocess):
 def test_process_benchmark_result():
     bench = {
         "name": "test_bench",
-        "group": "read",
+        "group": "read_fixed_duration",
         "extra_info": {"file_size": 100, "files": 2},
         "stats": {"min": 0.1, "data": [0.1, 0.2]},
     }
@@ -64,7 +65,7 @@ def test_process_benchmark_result():
     row = run._process_benchmark_result(bench, headers, extra, stats)
 
     assert row["name"] == "test_bench"
-    assert row["group"] == "read"
+    assert row["group"] == "read_fixed_duration"
     assert row["file_size"] == 100
     assert "p90" in row
 
@@ -114,13 +115,14 @@ def test_format_mb():
 def test_create_table_row():
     row = {
         "bucket_type": "regional",
-        "group": "read",
+        "group": "read_fixed_duration",
         "pattern": "seq",
         "files": 1,
         "folders": 0,
         "threads": 1,
         "processes": 1,
         "depth": 0,
+        "target_type": "file",
         "file_size": 1024 * 1024,
         "chunk_size": 1024,
         "block_size": 1024,
@@ -132,7 +134,7 @@ def test_create_table_row():
     }
     table_row = run._create_table_row(row)
     assert table_row[0] == "regional"
-    assert table_row[8] == "1.00"  # file size MB
+    assert table_row[9] == "1.00"  # file size MB
 
 
 @mock.patch("gcsfs.tests.perf.microbenchmarks.run.PrettyTable")
