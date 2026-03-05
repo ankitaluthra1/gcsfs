@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from glob import has_magic
 from io import BytesIO
@@ -67,6 +68,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         if self.credentials.token == "anon":
             self.credential = AnonymousCredentials()
         self._storage_layout_cache = {}
+        self.memmove_executor = ThreadPoolExecutor(max_workers=8)
 
     @property
     def grpc_client(self):

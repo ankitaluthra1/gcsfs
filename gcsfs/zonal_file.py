@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fsspec import asyn
@@ -10,8 +11,15 @@ from google.cloud.storage.asyncio.async_multi_range_downloader import (
 
 from gcsfs import zb_hns_utils
 from gcsfs.core import DEFAULT_BLOCK_SIZE, GCSFile
+from gcsfs.zb_hns_utils import (
+    DirectMemmoveBuffer,
+    MRDPool,
+    PyBytes_AsString,
+    PyBytes_FromStringAndSize,
+)
 
 from .caching import (  # noqa: F401 Unused import to register GCS-Specific caches, Please do not remove it.
+    Prefetcher,
     ReadAheadChunked,
 )
 
@@ -43,6 +51,7 @@ class ZonalFile(GCSFile):
         kms_key_name=None,
         finalize_on_close=False,
         flush_interval_bytes=_DEFAULT_FLUSH_INTERVAL_BYTES,
+        pool_size=zb_hns_utils._AUTO,
         **kwargs,
     ):
         """
@@ -62,22 +71,38 @@ class ZonalFile(GCSFile):
         bucket, key, generation = gcsfs._split_path(path)
         if not key:
             raise OSError("Attempt to open a bucket")
-        self.mrd = None
+
+        self.mrd_pool = None
         self.finalize_on_close = finalize_on_close
         self.finalized = False
         self.mode = mode
         self.gcsfs = gcsfs
+
+        if pool_size != zb_hns_utils._AUTO:
+            self.pool_size = pool_size
+        else:
+            self.pool_size = 4 if cache_type == Prefetcher.name else 1
         object_size = None
+
+        if cache_options is None:
+            cache_options = {}
+
         if "r" in self.mode:
-            self.mrd = asyn.sync(
-                self.gcsfs.loop, self._init_mrd, bucket, key, generation
-            )
-            object_size = self.mrd.persisted_size
+            self.mrd_pool = MRDPool(self.gcsfs, bucket, key, generation, self.pool_size)
+            asyn.sync(self.gcsfs.loop, self.mrd_pool.initialize)
+            object_size = self.mrd_pool.persisted_size
+
             if object_size is None:
                 logger.warning(
                     "AsyncMultiRangeDownloader (MRD) exists but has no 'persisted_size'. "
                     "This may result in incorrect behavior for unfinalized objects."
                 )
+
+            # These caches support overriding the default fetcher method.
+            _FETCHER_OVERRIDE = {Prefetcher.name: self._fetch_logical_chunk}
+            if cache_type in _FETCHER_OVERRIDE:
+                cache_options["fetcher_override"] = _FETCHER_OVERRIDE[cache_type]
+
         elif "w" in self.mode or "a" in self.mode:
             self.aaow = asyn.sync(
                 self.gcsfs.loop,
@@ -159,22 +184,96 @@ class ZonalFile(GCSFile):
                 "The end and chunk_lengths arguments are mutually exclusive and cannot be used together."
             )
 
-        try:
-            if chunk_lengths is not None:
-                return asyn.sync(
-                    self.fs.loop,
-                    self.gcsfs._fetch_range_split,
-                    self.path,
-                    start=start,
-                    chunk_lengths=chunk_lengths,
-                    size=self.size,
-                    mrd=self.mrd,
+        async def _do_fetch():
+            async with self.mrd_pool.get_mrd() as mrd:
+                if chunk_lengths is not None:
+                    return await self.gcsfs._fetch_range_split(
+                        self.path,
+                        start=start,
+                        chunk_lengths=chunk_lengths,
+                        size=self.size,
+                        mrd=mrd,
+                    )
+                return await self.gcsfs._cat_file(
+                    self.path, start=start, end=end, mrd=mrd
                 )
-            return self.gcsfs.cat_file(self.path, start=start, end=end, mrd=self.mrd)
+
+        try:
+            return asyn.sync(self.fs.loop, _do_fetch)
         except RuntimeError as e:
             if "not satisfiable" in str(e):
                 return b"" if chunk_lengths is None else [b""]
             raise
+
+    async def _fetch_logical_chunk(self, start_offset, total_size, split_factor=1):
+        """
+        A custom asynchronous fetcher designed to be mapped to the Prefetcher cache.
+
+        Pre-allocates an uninitialized Python bytes object at the C-level and pulls
+        data directly into that memory space using `DirectMemmoveBuffer`. For large
+        chunks (>16MB), it splits the request into concurrent multi-range downloads
+        using the MRD pool, drastically improving throughput.
+
+        Args:
+            start_offset (int): The starting byte offset in the remote file.
+            total_size (int): The total number of bytes to fetch.
+            split_factor (int): The number of parts in slicing process.
+
+        Returns:
+            bytes: The fully downloaded logical chunk.
+
+        Raises:
+            Exception: Any exception encountered during concurrent chunk downloads.
+        """
+        result_bytes = PyBytes_FromStringAndSize(None, total_size)
+        buffer_ptr = PyBytes_AsString(result_bytes)
+        loop = asyncio.get_running_loop()
+
+        if split_factor == 1:
+            buf = DirectMemmoveBuffer(buffer_ptr, self.gcsfs.memmove_executor)
+            try:
+                async with self.mrd_pool.get_mrd() as mrd:
+                    await mrd.download_ranges([(start_offset, total_size, buf)])
+            finally:
+                await loop.run_in_executor(None, buf.close)
+        else:
+            part_size = total_size // split_factor
+            tasks = []
+            buffers = []
+
+            for i in range(split_factor):
+                offset = start_offset + (i * part_size)
+                actual_size = (
+                    part_size if i < split_factor - 1 else total_size - (i * part_size)
+                )
+
+                part_address = buffer_ptr + (offset - start_offset)
+                buf = DirectMemmoveBuffer(part_address, self.gcsfs.memmove_executor)
+                buffers.append(buf)
+
+                async def _download(o, s, b):
+                    async with self.mrd_pool.get_mrd() as mrd:
+                        await mrd.download_ranges([(o, s, b)])
+
+                task = asyncio.create_task(_download(offset, actual_size, buf))
+                tasks.append(task)
+
+            try:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for res in results:
+                    if isinstance(res, Exception):
+                        raise res
+            except BaseException:
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
+            finally:
+                for buf in buffers:
+                    await loop.run_in_executor(None, buf.close)
+
+        return result_bytes
 
     def write(self, data):
         """
@@ -290,14 +389,20 @@ class ZonalFile(GCSFile):
         """
         if self.closed:
             return
-        # super is closed before aaow since flush may need aaow
-        super().close()
-        if hasattr(self, "mrd") and self.mrd:
-            asyn.sync(self.gcsfs.loop, self.mrd.close)
-        # Only close aaow if the stream is open
-        if hasattr(self, "aaow") and self.aaow and self.aaow._is_stream_open:
-            asyn.sync(
-                self.gcsfs.loop,
-                self.aaow.close,
-                finalize_on_close=self.finalize_on_close,
-            )
+        if hasattr(self, "cache") and self.cache and hasattr(self.cache, "close"):
+            self.cache.close()
+
+        try:
+            # super is closed before aaow since flush may need aaow
+            super().close()
+        finally:
+            if hasattr(self, "mrd_pool") and self.mrd_pool:
+                asyn.sync(self.gcsfs.loop, self.mrd_pool.close)
+
+            # Only close aaow if the stream is open
+            if hasattr(self, "aaow") and self.aaow and self.aaow._is_stream_open:
+                asyn.sync(
+                    self.gcsfs.loop,
+                    self.aaow.close,
+                    finalize_on_close=self.finalize_on_close,
+                )
