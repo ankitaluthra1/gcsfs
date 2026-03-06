@@ -24,7 +24,7 @@ from gcsfs.tests.settings import TEST_HNS_BUCKET
 REQUIRED_ENV_VAR = "GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT"
 
 # If the condition is True, only then tests in this file are run.
-should_run = os.getenv(REQUIRED_ENV_VAR, "false").lower() in (
+should_run = os.getenv(REQUIRED_ENV_VAR, "true").lower() in (
     "true",
     "1",
 )

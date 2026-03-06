@@ -27,6 +27,9 @@ case "$TEST_SUITE" in
       --deselect gcsfs/tests/test_extended_gcsfs.py \
       --deselect gcsfs/tests/test_zonal_file.py \
       --deselect gcsfs/tests/test_extended_gcsfs_unit.py \
+      --deselect gcsfs/tests/test_extended_zonal_gcsfs.py \
+      --deselect gcsfs/tests/integration/test_async_gcsfs.py \
+      --deselect gcsfs/tests/integration/test_extended_hns.py
     ;;
 
   "zonal")
@@ -37,6 +40,7 @@ case "$TEST_SUITE" in
     pytest "${ARGS[@]}" \
       gcsfs/tests/test_extended_gcsfs.py \
       gcsfs/tests/test_zonal_file.py \
+      gcsfs/tests/test_extended_zonal_gcsfs.py \
       gcsfs/tests/integration/test_async_gcsfs.py \
       gcsfs/tests/integration/test_extended_hns.py
     ;;
@@ -57,7 +61,8 @@ case "$TEST_SUITE" in
       --deselect gcsfs/tests/test_extended_gcsfs_unit.py \
       --deselect gcsfs/tests/test_core_versioned.py \
       --deselect gcsfs/tests/test_core.py::test_sign \
-      --deselect gcsfs/tests/test_core.py::test_mv_file_cache
+      --deselect gcsfs/tests/test_core.py::test_mv_file_cache \
+      --deselect gcsfs/tests/test_extended_zonal_gcsfs.py
     ;;
 
   "zonal-core")
