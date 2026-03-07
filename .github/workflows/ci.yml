@@ -66,6 +66,7 @@ jobs:
             --log-format="%(asctime)s %(levelname)s %(message)s" \
             --log-date-format="%H:%M:%S" \
             gcsfs/tests/test_extended_gcsfs.py \
+            gcsfs/tests/test_extended_gcsfs_unit.py \
             gcsfs/tests/test_zonal_file.py
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
