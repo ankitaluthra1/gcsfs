@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 import uuid
 from enum import Enum
 from glob import has_magic
@@ -20,6 +21,7 @@ from google.cloud.storage.asyncio.async_grpc_client import AsyncGrpcClient
 from gcsfs import __version__ as version
 from gcsfs import zb_hns_utils
 from gcsfs.core import GCSFile, GCSFileSystem
+from gcsfs.latency_tracker import latency_measurements
 from gcsfs.zonal_file import ZonalFile
 
 logger = logging.getLogger("gcsfs")
@@ -661,7 +663,13 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
                 # Verify existence using get_folder API
                 client = await self._get_control_plane_client()
+                t0 = time.perf_counter()
                 response = await client.get_folder(request=request)
+                dt = time.perf_counter() - t0
+                logger.info(f"Latency get_folder({path}): {dt*1000:.2f} ms")
+                latency_measurements.append(
+                    {"operation": "get_folder", "path": path, "latency_ms": dt * 1000}
+                )
 
                 # If successful, return directory metadata
                 return {

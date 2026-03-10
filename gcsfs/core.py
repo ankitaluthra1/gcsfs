@@ -30,6 +30,7 @@ from . import __version__ as version
 from .checkers import get_consistency_checker
 from .credentials import GoogleCredentials
 from .inventory_report import InventoryReport
+from .latency_tracker import latency_measurements
 from .retry import errs, retry_request, validate_response
 
 logger = logging.getLogger("gcsfs")
@@ -583,8 +584,13 @@ class GCSFileSystem(asyn.AsyncFileSystem):
         # Work around various permission settings. Prefer an object get (storage.objects.get), but
         # fall back to a bucket list + filter to object name (storage.objects.list).
         try:
+            t0 = time.perf_counter()
             res = await self._call(
                 "GET", "b/{}/o/{}", bucket, key, json_out=True, generation=generation
+            )
+            dt = time.perf_counter() - t0
+            latency_measurements.append(
+                {"operation": "get", "path": path, "latency_ms": dt * 1000}
             )
         except OSError as e:
             if not str(e).startswith("Forbidden"):
@@ -1088,6 +1094,9 @@ class GCSFileSystem(asyn.AsyncFileSystem):
             res = await self._get_object(path)
             dt = time.perf_counter() - t0
             logger.info(f"Latency _get_object({path}): {dt*1000:.2f} ms")
+            latency_measurements.append(
+                {"operation": "get_object", "path": path, "latency_ms": dt * 1000}
+            )
             return res
 
         async def measured_get_directory_info():
@@ -1095,6 +1104,13 @@ class GCSFileSystem(asyn.AsyncFileSystem):
             res = await self._get_directory_info(path, bucket, key, generation)
             dt = time.perf_counter() - t0
             logger.info(f"Latency _get_directory_info({path}): {dt*1000:.2f} ms")
+            latency_measurements.append(
+                {
+                    "operation": "get_directory_info",
+                    "path": path,
+                    "latency_ms": dt * 1000,
+                }
+            )
             return res
 
         results = await asyncio.gather(

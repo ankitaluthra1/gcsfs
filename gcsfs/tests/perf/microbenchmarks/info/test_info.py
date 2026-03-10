@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from gcsfs.latency_tracker import latency_measurements
 from gcsfs.tests.perf.microbenchmarks.info.configs import get_info_benchmark_cases
 from gcsfs.tests.perf.microbenchmarks.runner import (
     filter_test_cases,
@@ -11,6 +12,39 @@ from gcsfs.tests.perf.microbenchmarks.runner import (
     run_multi_threaded,
     run_single_threaded,
 )
+
+
+def _print_latency_table():
+    if not latency_measurements:
+        return
+    import collections
+
+    stats = collections.defaultdict(list)
+    output = []
+    output.append("\n" + "=" * 80)
+    output.append(f"{'Operation':<25} | {'Path':<35} | {'Latency (ms)':<15}")
+    output.append("-" * 80)
+    for m in latency_measurements:
+        output.append(
+            f"{m['operation']:<25} | {m['path']:<35} | {m['latency_ms']:<15.2f}"
+        )
+        stats[m["operation"]].append(m["latency_ms"])
+    output.append("-" * 80)
+    output.append(f"{'Operation':<25} | {'Count':<5} | {'Mean Latency (ms)':<20}")
+    output.append("-" * 80)
+    for op, lats in stats.items():
+        mean_lat = sum(lats) / len(lats)
+        output.append(f"{op:<25} | {len(lats):<5} | {mean_lat:<20.2f}")
+    output.append("=" * 80 + "\n")
+
+    out_str = "\n".join(output)
+    print(out_str)
+
+    with open("latency_results.txt", "a") as f:
+        f.write(out_str + "\n")
+
+    latency_measurements.clear()
+
 
 BENCHMARK_GROUP = "info"
 
@@ -58,6 +92,7 @@ def test_info_single_threaded(benchmark, gcsfs_benchmark_info, monitor):
         (gcs, paths, params.pattern),
         BENCHMARK_GROUP,
     )
+    _print_latency_table()
 
 
 @pytest.mark.parametrize(
@@ -79,6 +114,7 @@ def test_info_multi_threaded(benchmark, gcsfs_benchmark_info, monitor):
         (gcs, paths, params.pattern),
         BENCHMARK_GROUP,
     )
+    _print_latency_table()
 
 
 def _get_target_paths(target_dirs, file_paths, params):
