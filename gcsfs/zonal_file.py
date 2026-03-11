@@ -197,6 +197,9 @@ class ZonalFile(GCSFile):
         # unnecessary object creation for files that are opened but never written to.
         self._ensure_aaow()
         asyn.sync(self.gcsfs.loop, self.aaow.append, data)
+        bytes_written = len(data)
+        self.loc += bytes_written
+        return bytes_written
 
     def flush(self, force=False):
         """
@@ -254,6 +257,18 @@ class ZonalFile(GCSFile):
             "Discard is not applicable for Zonal Buckets. \
             Data is uploaded via streaming and cannot be cancelled."
         )
+
+    def tell(self):
+        """Return the current file position."""
+        offset = 0
+        if self.writable():
+            if self.aaow is not None:
+                offset = self.aaow.offset
+            if "a" in self.mode:
+                self._ensure_aaow()
+                offset = self.aaow.offset
+        print(f"ZonalFile Tell Current offset: {offset}")
+        return offset
 
     def _initiate_upload(self):
         """Initiates the upload for Zonal buckets using gRPC."""
