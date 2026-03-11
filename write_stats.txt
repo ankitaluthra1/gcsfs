@@ -1,0 +1,8 @@
+
+--- Zonal Bucket Statistics (10 iterations) ---
+Total _pipe_file Latency: Mean: 0.1363s, Var: 0.020740, Min: 0.0723s, Max: 0.5447s
+init_aaow Latency:        Mean: 0.1022s, Var: 0.008561, Min: 0.0555s, Max: 0.3629s
+
+--- Regional HNS Bucket Statistics (10 iterations) ---
+Total _pipe_file Latency: Mean: 0.2483s, Var: 0.000814, Min: 0.2195s, Max: 0.3031s
+init_aaow Latency:        Mean: 0.0000s, Var: 0.000000, Min: 0.0000s, Max: 0.0000s

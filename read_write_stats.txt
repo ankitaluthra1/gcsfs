@@ -1,0 +1,10 @@
+
+--- Zonal Bucket Latency Statistics (10 iterations) ---
+First Write Latency (Zonal):      Mean: 0.1216s, Var: 0.008345, Min: 0.0713s, Max: 0.3781s
+Subsequent Write Latency (Zonal): Mean: 0.0948s, Var: 0.000438, Min: 0.0636s, Max: 0.1294s
+First Read Latency (Zonal):       Mean: 0.0393s, Var: 0.000119, Min: 0.0223s, Max: 0.0535s
+
+--- Regional Bucket Latency Statistics (10 iterations) ---
+First Write Latency (Regional):      Mean: 0.4139s, Var: 0.253122, Min: 0.2436s, Max: 1.8453s
+Subsequent Write Latency (Regional): Mean: 0.2581s, Var: 0.000529, Min: 0.2378s, Max: 0.3028s
+First Read Latency (Regional):       Mean: 0.0384s, Var: 0.000030, Min: 0.0326s, Max: 0.0480s

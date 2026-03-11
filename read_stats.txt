@@ -1,0 +1,14 @@
+HNS bucket Latency (10 iterations):
+  Total cat_file() time    -> Mean: 0.0503s, Var: 0.003720, Min: 0.0272s, Max: 0.2237s
+  get_grpc_client time -> Mean: 0.0000s, Var: 0.000000, Min: 0.0000s, Max: 0.0000s
+  init_mrd time        -> Mean: 0.0000s, Var: 0.000000, Min: 0.0000s, Max: 0.0000s
+
+Zonal bucket Latency (10 iterations):
+  Total cat_file() time    -> Mean: 0.0877s, Var: 0.007009, Min: 0.0339s, Max: 0.3138s
+  get_grpc_client time -> Mean: 0.0001s, Var: 0.000000, Min: 0.0000s, Max: 0.0012s
+  init_mrd time        -> Mean: 0.0794s, Var: 0.004851, Min: 0.0312s, Max: 0.2626s
+
+Regional bucket Latency (10 iterations):
+  Total cat_file() time    -> Mean: 0.0339s, Var: 0.000680, Min: 0.0224s, Max: 0.1079s
+  get_grpc_client time -> Mean: 0.0000s, Var: 0.000000, Min: 0.0000s, Max: 0.0000s
+  init_mrd time        -> Mean: 0.0000s, Var: 0.000000, Min: 0.0000s, Max: 0.0000s
