@@ -20,7 +20,7 @@ import pytest
 from gcsfs.extended_gcsfs import BucketType
 from gcsfs.tests.settings import TEST_HNS_BUCKET
 
-should_run_hns = os.getenv("GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT", "false").lower() in (
+should_run_hns = os.getenv("GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT", "true").lower() in (
     "true",
     "1",
 )

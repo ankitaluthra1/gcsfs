@@ -22,7 +22,14 @@ case "$TEST_SUITE" in
   "standard")
     export GCSFS_TEST_BUCKET="gcsfs-test-standard-${SHORT_BUILD_ID}"
     export GCSFS_TEST_VERSIONED_BUCKET="gcsfs-test-versioned-${SHORT_BUILD_ID}"
-    pytest "${ARGS[@]}" gcsfs/ --deselect gcsfs/tests/test_core.py::test_sign
+    pytest "${ARGS[@]}" gcsfs/ \
+      --deselect gcsfs/tests/test_core.py::test_sign \
+      --deselect gcsfs/tests/test_extended_gcsfs.py \
+      --deselect gcsfs/tests/test_zonal_file.py \
+      --deselect gcsfs/tests/test_extended_gcsfs_unit.py \
+      --deselect gcsfs/tests/test_extended_zonal_gcsfs.py \
+      --deselect gcsfs/tests/integration/test_async_gcsfs.py \
+      --deselect gcsfs/tests/integration/test_extended_hns.py
     ;;
 
   "zonal")
@@ -30,10 +37,10 @@ case "$TEST_SUITE" in
     export GCSFS_ZONAL_TEST_BUCKET="gcsfs-test-zonal-${SHORT_BUILD_ID}"
     export GCSFS_HNS_TEST_BUCKET="gcsfs-test-zonal-${SHORT_BUILD_ID}"
     ulimit -n 4096
-    export GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT='true'
     pytest "${ARGS[@]}" \
       gcsfs/tests/test_extended_gcsfs.py \
       gcsfs/tests/test_zonal_file.py \
+      gcsfs/tests/test_extended_zonal_gcsfs.py \
       gcsfs/tests/integration/test_async_gcsfs.py \
       gcsfs/tests/integration/test_extended_hns.py
     ;;
@@ -42,7 +49,6 @@ case "$TEST_SUITE" in
     export GCSFS_TEST_BUCKET="gcsfs-test-hns-${SHORT_BUILD_ID}"
     export GCSFS_ZONAL_TEST_BUCKET="gcsfs-test-hns-${SHORT_BUILD_ID}"
     export GCSFS_HNS_TEST_BUCKET="gcsfs-test-hns-${SHORT_BUILD_ID}"
-    export GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT='true'
     # Excludes tests that are not applicable to HNS buckets:
     # - test_extended_gcsfs.py, test_zonal_file.py: Zonal bucket specific tests which won't work on HNS bucket.
     # - test_extended_gcsfs_unit.py: Unit tests for zonal bucket features.
@@ -55,12 +61,12 @@ case "$TEST_SUITE" in
       --deselect gcsfs/tests/test_extended_gcsfs_unit.py \
       --deselect gcsfs/tests/test_core_versioned.py \
       --deselect gcsfs/tests/test_core.py::test_sign \
-      --deselect gcsfs/tests/test_core.py::test_mv_file_cache
+      --deselect gcsfs/tests/test_core.py::test_mv_file_cache \
+      --deselect gcsfs/tests/test_extended_zonal_gcsfs.py
     ;;
 
   "zonal-core")
     export GCSFS_TEST_BUCKET="gcsfs-test-zonal-core-${SHORT_BUILD_ID}"
-    export GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT='true'
     ulimit -n 4096
 
     # Zonal Core Deselections
