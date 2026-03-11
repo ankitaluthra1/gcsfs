@@ -1,4 +1,5 @@
 import logging
+import statistics
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -30,12 +31,22 @@ def _print_latency_table():
         )
         stats[m["operation"]].append(m["latency_ms"])
     output.append("-" * 80)
-    output.append(f"{'Operation':<25} | {'Count':<5} | {'Mean Latency (ms)':<20}")
-    output.append("-" * 80)
+    output.append(
+        f"{'Operation':<20} | {'Count':<5} | {'Mean':<10} | {'Median':<10} | {'Min':<10} | {'Max':<10} | {'Var':<10}"
+    )
+    output.append("-" * 90)
     for op, lats in stats.items():
-        mean_lat = sum(lats) / len(lats)
-        output.append(f"{op:<25} | {len(lats):<5} | {mean_lat:<20.2f}")
-    output.append("=" * 80 + "\n")
+        count = len(lats)
+        mean_lat = sum(lats) / count
+        median_lat = statistics.median(lats)
+        min_lat = min(lats)
+        max_lat = max(lats)
+        variance = statistics.variance(lats) if count > 1 else 0.0
+        output.append(
+            f"{op:<20} | {count:<5} | {mean_lat:<10.2f} | {median_lat:<10.2f} | "
+            f"{min_lat:<10.2f} | {max_lat:<10.2f} | {variance:<10.2f}"
+        )
+    output.append("=" * 90 + "\n")
 
     out_str = "\n".join(output)
     print(out_str)
