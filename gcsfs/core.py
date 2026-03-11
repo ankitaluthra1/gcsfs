@@ -10,6 +10,7 @@ import mimetypes
 import os
 import posixpath
 import re
+import time
 import uuid
 import warnings
 import weakref
@@ -1080,15 +1081,40 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                 "storageClass": "DIRECTORY",
                 "type": "directory",
             }
-        # Check exact file path
-        try:
-            exact = await self._get_object(path)
+
+        # Check both exact file path and directory info in parellel to distinguish file, directory, or not found
+        async def measured_get_object():
+            t0 = time.perf_counter()
+            res = await self._get_object(path)
+            dt = time.perf_counter() - t0
+            logger.info(f"Latency _get_object({path}): {dt*1000:.2f} ms")
+            return res
+
+        async def measured_get_directory_info():
+            t0 = time.perf_counter()
+            res = await self._get_directory_info(path, bucket, key, generation)
+            dt = time.perf_counter() - t0
+            logger.info(f"Latency _get_directory_info({path}): {dt*1000:.2f} ms")
+            return res
+
+        results = await asyncio.gather(
+            measured_get_object(),
+            measured_get_directory_info(),
+            return_exceptions=True,
+        )
+        exact, dir_info = results
+
+        if not isinstance(exact, Exception):
             # this condition finds a "placeholder" - still need to check if it's a directory
             if not _is_directory_marker(exact):
                 return exact
-        except FileNotFoundError:
-            pass
-        return await self._get_directory_info(path, bucket, key, generation)
+        elif not isinstance(exact, FileNotFoundError):
+            raise exact
+
+        if not isinstance(dir_info, Exception):
+            return dir_info
+
+        raise dir_info
 
     async def _get_directory_info(self, path, bucket, key, generation):
         """
