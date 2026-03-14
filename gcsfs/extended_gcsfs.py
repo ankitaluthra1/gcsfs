@@ -69,10 +69,34 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         if self.credentials.token == "anon":
             self.credential = AnonymousCredentials()
         self._storage_layout_cache = {}
+        self._mrd_pool_cache = zb_hns_utils.MRDPoolCache(
+            max_idle_pools=kwargs.get("max_cached_idle_mrd_pools", 0)
+        )
         self.memmove_executor = ThreadPoolExecutor(
             max_workers=kwargs.get("memmove_max_workers", 8)
         )
+        weakref.finalize(
+            self,
+            self._close_mrd_pool_cache,
+            self.loop,
+            self._mrd_pool_cache,
+            self.asynchronous,
+        )
         weakref.finalize(self, self.memmove_executor.shutdown)
+
+    @staticmethod
+    def _close_mrd_pool_cache(loop, cache, asynchronous=False):
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        if loop:
+            if loop.is_running():
+                loop.create_task(cache.close())
+        elif current_loop is not None and current_loop.is_running() and asynchronous:
+            current_loop.create_task(cache.close())
+        elif asyn.loop[0] is not None and asyn.loop[0].is_running():
+            asyn.sync(asyn.loop[0], cache.close, timeout=0.1)
 
     @property
     def grpc_client(self):
