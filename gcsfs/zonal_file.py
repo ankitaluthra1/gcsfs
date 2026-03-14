@@ -87,8 +87,15 @@ class ZonalFile(GCSFile):
             cache_options = {}
 
         if "r" in self.mode:
-            self.mrd_pool = MRDPool(self.gcsfs, bucket, key, generation, self.pool_size)
-            asyn.sync(self.gcsfs.loop, self.mrd_pool.initialize)
+            self.mrd_pool = asyn.sync(
+                self.gcsfs.loop,
+                self.gcsfs.mrd_pool_cache.get,
+                self.gcsfs,
+                bucket,
+                key,
+                generation,
+                self.pool_size,
+            )
             object_size = self.mrd_pool.persisted_size
 
             if object_size is None:
@@ -418,7 +425,9 @@ class ZonalFile(GCSFile):
             super().close()
         finally:
             if hasattr(self, "mrd_pool") and self.mrd_pool:
-                asyn.sync(self.gcsfs.loop, self.mrd_pool.close)
+                asyn.sync(
+                    self.gcsfs.loop, self.gcsfs.mrd_pool_cache.release, self.mrd_pool
+                )
 
             # Only close aaow if the stream is open
             if self.aaow and self.aaow._is_stream_open:
