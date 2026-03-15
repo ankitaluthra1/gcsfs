@@ -4,7 +4,7 @@ common:
     - "zonal"
   file_sizes_mb:
     - 1024 # 1 GB
-  block_sizes_mb:
+  chunk_sizes_mb:
     - 1
     - 16
   rounds: 3

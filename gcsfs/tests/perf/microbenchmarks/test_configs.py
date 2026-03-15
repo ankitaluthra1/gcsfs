@@ -76,19 +76,27 @@ def test_read_configurator(mock_config_dependencies):
     common = {
         "bucket_types": ["regional"],
         "file_sizes_mb": [1],
-        "block_sizes_mb": [16],
+        "chunk_sizes_mb": [16],
         "rounds": 1,
     }
-    scenario = {"name": "read_test", "processes": [1], "threads": [1], "pattern": "seq"}
+    scenario = {
+        "name": "read_test",
+        "processes": [1],
+        "threads": [1],
+        "pattern": "seq",
+        "block_sizes_mb": [16],
+    }
 
     configurator = ReadFixedDurationConfigurator("dummy")
     cases = configurator.build_cases(scenario, common)
 
     assert len(cases) == 1
     case = cases[0]
-    assert case.name == "read_test_1procs_1threads_1MB_file_16MB_block_regional"
+    assert (
+        case.name == "read_test_1procs_1threads_1MB_file_16MB_chunk_16MB_block_regional"
+    )
     assert case.file_size_bytes == 1 * MB
-    assert case.block_size_bytes == 5 * MB
+    assert case.block_size_bytes == 16 * MB
     assert case.chunk_size_bytes == 16 * MB
     assert case.pattern == "seq"
     assert case.bucket_name == "test-bucket"
