@@ -8,6 +8,7 @@ from enum import Enum
 from glob import has_magic
 from io import BytesIO
 
+import fsspec
 from fsspec import asyn
 from fsspec.callbacks import NoOpCallback
 from google.api_core import exceptions as api_exceptions
@@ -69,8 +70,10 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         if self.credentials.token == "anon":
             self.credential = AnonymousCredentials()
         self._storage_layout_cache = {}
-        self._mrd_pool_cache = zb_hns_utils.MRDPoolCache(
-            max_idle_pools=kwargs.get("max_cached_idle_mrd_pools", 0)
+        self.mrd_pool_cache = zb_hns_utils.MRDPoolCache(
+            gcsfs=self,
+            pool_size=kwargs.get("mrd_pool_size", 4),
+            max_idle_pools=kwargs.get("max_cached_idle_mrd_pools", 0),
         )
         self.memmove_executor = ThreadPoolExecutor(
             max_workers=kwargs.get("memmove_max_workers", 8)
@@ -79,13 +82,14 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             self,
             self._close_mrd_pool_cache,
             self.loop,
-            self._mrd_pool_cache,
+            self.mrd_pool_cache,
             self.asynchronous,
         )
         weakref.finalize(self, self.memmove_executor.shutdown)
 
     @staticmethod
     def _close_mrd_pool_cache(loop, cache, asynchronous=False):
+        force_close = False
         try:
             current_loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -93,10 +97,20 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         if loop:
             if loop.is_running():
                 loop.create_task(cache.close())
+            else:
+                force_close = True
         elif current_loop is not None and current_loop.is_running() and asynchronous:
             current_loop.create_task(cache.close())
         elif asyn.loop[0] is not None and asyn.loop[0].is_running():
-            asyn.sync(asyn.loop[0], cache.close, timeout=0.1)
+            try:
+                asyn.sync(asyn.loop[0], cache.close, timeout=0.1)
+            except fsspec.FSTimeoutError:
+                force_close = True
+        else:
+            force_close = True
+
+        if force_close:
+            asyncio.run(cache.close())
 
     @property
     def grpc_client(self):
@@ -300,7 +314,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         """
 
         bucket, object_name, generation = self.split_path(path)
-        mrd_created = False
+        mrd_pool = None
         try:
             if mrd is None:
                 # Check before creating MRD
@@ -309,13 +323,11 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                         "Internal error, this method is only supported for zonal buckets!"
                     )
 
-                await self._get_grpc_client()
-                mrd = await zb_hns_utils.init_mrd(
-                    self.grpc_client, bucket, object_name, generation
+                mrd_pool = await self.mrd_pool_cache.get(
+                    bucket, object_name, generation
                 )
-                mrd_created = True
 
-            file_size = size or mrd.persisted_size
+            file_size = size or (mrd or mrd_pool).persisted_size
             if file_size is None:
                 logger.warning(
                     "AsyncMultiRangeDownloader (MRD) has no 'persisted_size'. "
@@ -346,7 +358,11 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                     current_offset += length
 
                 if read_ranges:
-                    await mrd.download_ranges(read_ranges)
+                    if mrd_pool:
+                        async with mrd_pool.get_mrd() as mrd_instance:
+                            await mrd_instance.download_ranges(read_ranges)
+                    else:
+                        await mrd.download_ranges(read_ranges)
 
                 return [b.getvalue() for b in buffers]
             else:
@@ -355,13 +371,19 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                     path, start, end, file_size
                 )
 
-                data = await zb_hns_utils.download_range(
-                    offset=offset, length=length, mrd=mrd
-                )
+                if mrd_pool:
+                    async with mrd_pool.get_mrd() as mrd_instance:
+                        data = await zb_hns_utils.download_range(
+                            offset=offset, length=length, mrd=mrd_instance
+                        )
+                else:
+                    data = await zb_hns_utils.download_range(
+                        offset=offset, length=length, mrd=mrd
+                    )
                 return [data]
         finally:
-            if mrd_created:
-                await zb_hns_utils.close_mrd(mrd)
+            if mrd_pool:
+                await self.mrd_pool_cache.release(mrd_pool)
 
     async def _cat_file(self, path, start=None, end=None, mrd=None, **kwargs):
         """Fetch a file's contents as bytes, with an optimized path for Zonal buckets.
@@ -379,7 +401,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             bytes: The content of the file or file range.
         """
         try:
-            mrd_created = False
+            mrd_pool = None
 
             # A new MRD is required when read is done directly by the
             # GCSFilesystem class without creating a GCSFile object first.
@@ -389,13 +411,11 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 if not await self._is_zonal_bucket(bucket):
                     return await super()._cat_file(path, start=start, end=end, **kwargs)
 
-                await self._get_grpc_client()
-                mrd = await zb_hns_utils.init_mrd(
-                    self.grpc_client, bucket, object_name, generation
+                mrd_pool = await self.mrd_pool_cache.get(
+                    bucket, object_name, generation
                 )
-                mrd_created = True
 
-            file_size = mrd.persisted_size
+            file_size = (mrd or mrd_pool).persisted_size
             if file_size is None:
                 logger.warning(
                     "AsyncMultiRangeDownloader (MRD) exists but has no 'persisted_size'. "
@@ -406,13 +426,19 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 path, start, end, file_size
             )
 
-            return await zb_hns_utils.download_range(
-                offset=offset, length=length, mrd=mrd
-            )
+            if mrd_pool:
+                async with mrd_pool.get_mrd() as mrd_instance:
+                    return await zb_hns_utils.download_range(
+                        offset=offset, length=length, mrd=mrd_instance
+                    )
+            else:
+                return await zb_hns_utils.download_range(
+                    offset=offset, length=length, mrd=mrd
+                )
         finally:
             # Explicit cleanup if we created the MRD
-            if mrd_created:
-                await zb_hns_utils.close_mrd(mrd)
+            if mrd_pool:
+                await self.mrd_pool_cache.release(mrd_pool)
 
     async def _is_bucket_hns_enabled(self, bucket):
         """Checks if a bucket has Hierarchical Namespace enabled."""

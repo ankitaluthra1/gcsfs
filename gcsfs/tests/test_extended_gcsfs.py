@@ -363,9 +363,9 @@ def test_multithreaded_read_disjoint_ranges_zb(extended_gcsfs, gcs_bucket_mocks)
         assert results[2] == _MULTI_THREADED_TEST_DATA[4096:5120]
 
         if mocks:
-            assert mocks["create_mrd"].call_count == len(read_tasks)
+            assert mocks["create_mrd"].call_count == 1
             assert mocks["downloader"].download_ranges.call_count == len(read_tasks)
-            assert mocks["downloader"].close.call_count == len(read_tasks)
+            assert mocks["downloader"].close.call_count == 1
 
 
 def test_multithreaded_read_overlapping_ranges_zb(extended_gcsfs, gcs_bucket_mocks):
@@ -400,9 +400,9 @@ def test_multithreaded_read_overlapping_ranges_zb(extended_gcsfs, gcs_bucket_moc
         assert results[2] == _MULTI_THREADED_TEST_DATA[0:2048]
 
         if mocks:
-            assert mocks["create_mrd"].call_count == len(read_tasks)
+            assert mocks["create_mrd"].call_count == 1
             assert mocks["downloader"].download_ranges.call_count == len(read_tasks)
-            assert mocks["downloader"].close.call_count == len(read_tasks)
+            assert mocks["downloader"].close.call_count == 1
 
 
 def test_default_cache_is_readahead_chunked(extended_gcsfs, gcs_bucket_mocks):
@@ -478,9 +478,9 @@ def test_multithreaded_read_chunk_boundary_zb(extended_gcsfs, gcs_bucket_mocks):
         )
 
         if mocks:
-            assert mocks["create_mrd"].call_count == len(read_tasks)
+            assert mocks["create_mrd"].call_count == 1
             assert mocks["downloader"].download_ranges.call_count == len(read_tasks)
-            assert mocks["downloader"].close.call_count == len(read_tasks)
+            assert mocks["downloader"].close.call_count == 1
 
 
 def _read_random_range(fs, path, file_size, read_length):
@@ -519,12 +519,12 @@ def test_multithreaded_read_high_concurrency_zb(extended_gcsfs, gcs_bucket_mocks
             assert res in _MULTI_THREADED_TEST_DATA  # Ensure the content is valid
 
         if mocks:
-            assert mocks["create_mrd"].call_count == _NUM_CONCURRENCY_THREADS
+            assert mocks["create_mrd"].call_count == 1
             assert (
                 mocks["downloader"].download_ranges.call_count
                 == _NUM_CONCURRENCY_THREADS
             )
-            assert mocks["downloader"].close.call_count == _NUM_CONCURRENCY_THREADS
+            assert mocks["downloader"].close.call_count == 1
 
 
 def test_multithreaded_read_one_fails_others_survive_zb(
@@ -604,11 +604,11 @@ def test_multithreaded_read_one_fails_others_survive_zb(
                     == _MULTI_THREADED_TEST_DATA[i * 1024 : i * 1024 + 1024]
                 )
 
-        assert mocks["create_mrd"].call_count == _NUM_FAIL_SURVIVE_THREADS
+        assert mocks["create_mrd"].call_count == 1
         assert (
             mocks["downloader"].download_ranges.call_count == _NUM_FAIL_SURVIVE_THREADS
         )
-        assert mocks["downloader"].close.call_count == _NUM_FAIL_SURVIVE_THREADS
+        assert mocks["downloader"].close.call_count == 1
 
 
 # =========================== Zonal Multiprocess Read Tests ===========================
