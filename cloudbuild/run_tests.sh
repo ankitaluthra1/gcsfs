@@ -6,6 +6,7 @@ source env/bin/activate
 export STORAGE_EMULATOR_HOST=https://storage.googleapis.com
 export GCSFS_TEST_PROJECT=${PROJECT_ID}
 export GCSFS_TEST_KMS_KEY=projects/${PROJECT_ID}/locations/${REGION}/keyRings/${KEY_RING}/cryptoKeys/${KEY_NAME}
+export GOOGLE_CLOUD_PROJECT=${PROJECT_ID}
 
 # Pytest Arguments
 ARGS=(
