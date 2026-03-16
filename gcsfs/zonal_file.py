@@ -10,7 +10,6 @@ from gcsfs import zb_hns_utils
 from gcsfs.core import DEFAULT_BLOCK_SIZE, GCSFile
 from gcsfs.zb_hns_utils import (
     DirectMemmoveBuffer,
-    MRDPool,
     PyBytes_AsString,
     PyBytes_FromStringAndSize,
 )
@@ -48,7 +47,6 @@ class ZonalFile(GCSFile):
         kms_key_name=None,
         finalize_on_close=False,
         flush_interval_bytes=_DEFAULT_FLUSH_INTERVAL_BYTES,
-        pool_size=zb_hns_utils._AUTO,
         **kwargs,
     ):
         """
@@ -77,10 +75,6 @@ class ZonalFile(GCSFile):
         self.flush_interval_bytes = flush_interval_bytes
         self.gcsfs = gcsfs
 
-        if pool_size != zb_hns_utils._AUTO:
-            self.pool_size = pool_size
-        else:
-            self.pool_size = 4 if cache_type == Prefetcher.name else 1
         object_size = None
 
         if cache_options is None:
@@ -90,11 +84,9 @@ class ZonalFile(GCSFile):
             self.mrd_pool = asyn.sync(
                 self.gcsfs.loop,
                 self.gcsfs.mrd_pool_cache.get,
-                self.gcsfs,
                 bucket,
                 key,
                 generation,
-                self.pool_size,
             )
             object_size = self.mrd_pool.persisted_size
 

@@ -10,7 +10,6 @@ from google.cloud.storage.asyncio.async_appendable_object_writer import (
     _DEFAULT_FLUSH_INTERVAL_BYTES,
 )
 
-from gcsfs.caching import Prefetcher
 from gcsfs.tests.settings import TEST_ZONAL_BUCKET
 from gcsfs.tests.utils import tempdir, tmpfile
 from gcsfs.zonal_file import ZonalFile
@@ -498,14 +497,11 @@ def mock_gcsfs():
 def test_zonal_file_prefetcher_initialization(mock_gcsfs):
     """Test that setting cache_type to 'prefetcher' injects the logical chunk fetcher."""
 
-    with (
-        mock.patch("gcsfs.zonal_file.MRDPool") as mrd_pool_mock,
-        mock.patch("gcsfs.zonal_file.asyn.sync"),
-    ):
+    with (mock.patch("gcsfs.zonal_file.asyn.sync") as mock_sync,):
 
         mrd_pool_instance = mock.Mock()
         mrd_pool_instance.persisted_size = 1000
-        mrd_pool_mock.return_value = mrd_pool_instance
+        mock_sync.return_value = mrd_pool_instance
 
         cache_options = {"concurrency": 2}
 
@@ -514,12 +510,10 @@ def test_zonal_file_prefetcher_initialization(mock_gcsfs):
             path="gs://test-bucket/test-key",
             mode="rb",
             cache_type="prefetcher",
-            pool_size=1,
             cache_options=cache_options,
         )
 
-        assert zf.pool_size == 1
-        assert zf.cache.name == Prefetcher.name
+        assert type(zf.cache).__name__ == "Prefetcher"
         assert zf.cache.size == 1000
 
         zf.close()
@@ -530,13 +524,11 @@ async def test_fetch_logical_chunk_split_logic(mock_gcsfs):
     """Test that chunks larger than 16MB are split correctly."""
 
     with (
-        mock.patch("gcsfs.zonal_file.MRDPool"),
         mock.patch("gcsfs.zonal_file.asyn.sync"),
         mock.patch("gcsfs.zonal_file.DirectMemmoveBuffer"),
     ):
 
         zf = ZonalFile(gcsfs=mock_gcsfs, path="gs://test-bucket/test-key", mode="rb")
-        zf.pool_size = 4
 
         zf.mrd_pool = mock.Mock()
         zf.gcsfs.memmove_executor = mock.Mock()
@@ -576,7 +568,6 @@ async def test_fetch_logical_chunk_split_logic(mock_gcsfs):
 async def test_zonal_fetch_logical_chunk_cancellation(mock_gcsfs):
     """Test the BaseException block (cancellation) cleans up and cancels inner tasks."""
     with (
-        mock.patch("gcsfs.zonal_file.MRDPool"),
         mock.patch("gcsfs.zonal_file.asyn.sync"),
         mock.patch("gcsfs.zonal_file.DirectMemmoveBuffer"),
     ):
@@ -620,7 +611,6 @@ async def test_zonal_fetch_logical_chunk_cancellation(mock_gcsfs):
 async def test_zonal_fetch_logical_chunk_single(mock_gcsfs):
     """Test successful single chunk download (split_factor=1)."""
     with (
-        mock.patch("gcsfs.zonal_file.MRDPool"),
         mock.patch("gcsfs.zonal_file.asyn.sync"),
         mock.patch("gcsfs.zonal_file.DirectMemmoveBuffer") as mem_buf_mock,
         mock.patch(
@@ -654,7 +644,6 @@ async def test_zonal_fetch_logical_chunk_single(mock_gcsfs):
 async def test_zonal_fetch_logical_chunk_single_exception(mock_gcsfs):
     """Test exception handling and buffer cleanup in single chunk download."""
     with (
-        mock.patch("gcsfs.zonal_file.MRDPool"),
         mock.patch("gcsfs.zonal_file.asyn.sync"),
         mock.patch("gcsfs.zonal_file.DirectMemmoveBuffer") as mem_buf_mock,
         mock.patch(
@@ -688,7 +677,6 @@ async def test_zonal_fetch_logical_chunk_single_exception(mock_gcsfs):
 async def test_zonal_fetch_logical_chunk_multi_exception(mock_gcsfs):
     """Test that standard Exceptions in concurrent downloads are caught and propagated."""
     with (
-        mock.patch("gcsfs.zonal_file.MRDPool"),
         mock.patch("gcsfs.zonal_file.asyn.sync"),
         mock.patch("gcsfs.zonal_file.DirectMemmoveBuffer") as mem_buf_mock,
         mock.patch(
@@ -731,7 +719,6 @@ async def test_zonal_fetch_logical_chunk_multi_exception(mock_gcsfs):
 async def test_zonal_fetch_logical_chunk_multi_cancellation(mock_gcsfs):
     """Test the BaseException block (cancellation) cleans up and cancels inner tasks."""
     with (
-        mock.patch("gcsfs.zonal_file.MRDPool"),
         mock.patch("gcsfs.zonal_file.asyn.sync"),
         mock.patch("gcsfs.zonal_file.DirectMemmoveBuffer") as mem_buf_mock,
         mock.patch(
@@ -759,3 +746,43 @@ async def test_zonal_fetch_logical_chunk_multi_cancellation(mock_gcsfs):
         assert mem_buf_mock.return_value.close.call_count == 2
 
         zf.close()
+
+
+@pytest.mark.asyncio
+async def test_zonal_file_mrd_pool_cache_lifecycle(mock_gcsfs):
+    """Test that opening a file in read mode fetches and releases the MRD pool."""
+    with mock.patch("gcsfs.zonal_file.asyn.sync") as mock_sync:
+        mock_pool = mock.MagicMock()
+        mock_pool.persisted_size = 1024
+
+        # asyn.sync is called for mrd_pool_cache.get during init
+        mock_sync.return_value = mock_pool
+
+        mock_gcsfs.mrd_pool_cache = mock.MagicMock()
+        mock_gcsfs.mrd_pool_cache.get = mock.AsyncMock()
+        mock_gcsfs.mrd_pool_cache.release = mock.AsyncMock()
+
+        zf = ZonalFile(
+            gcsfs=mock_gcsfs,
+            path="gs://test-bucket/test-key",
+            mode="rb",
+            generation="123",
+        )
+
+        mock_sync.assert_called_once_with(
+            mock_gcsfs.loop,
+            mock_gcsfs.mrd_pool_cache.get,
+            "test-bucket",
+            "test-key",
+            "123",
+        )
+
+        # Reset mock to test release
+        mock_sync.reset_mock()
+        zf.close()
+
+        mock_sync.assert_called_once_with(
+            mock_gcsfs.loop,
+            mock_gcsfs.mrd_pool_cache.release,
+            mock_pool,
+        )
