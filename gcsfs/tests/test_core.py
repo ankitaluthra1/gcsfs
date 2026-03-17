@@ -666,6 +666,60 @@ def test_seek(gcs):
             assert f.seek(i) == i
 
 
+def test_tell(gcs):
+    fn = TEST_BUCKET + "/test_tell"
+    data = b"abcdefghij"
+    with gcs.open(fn, "wb") as f:
+        f.write(data)
+
+    with gcs.open(fn, "rb") as f:
+        assert f.tell() == 0
+        f.read(2)
+        assert f.tell() == 2
+        f.seek(5)
+        assert f.tell() == 5
+        assert f.read(1) == b"f"
+        assert f.tell() == 6
+        f.seek(0, 2)
+        assert f.tell() == 10
+        f.seek(-2, 2)
+        assert f.tell() == 8
+        assert f.read(1) == b"i"
+        assert f.tell() == 9
+        f.seek(-1, 1)
+        assert f.tell() == 8
+        assert f.read(1) == b"i"
+        assert f.tell() == 9
+
+        # Seek beyond EOF
+        f.seek(100)
+        assert f.tell() == 100
+        assert f.read(1) == b""
+        assert f.tell() == 100
+
+    # fsspec does not currently raise on closed files for tell()
+    # but we can test other error cases for seek
+    with gcs.open(fn, "rb") as f:
+        with pytest.raises(ValueError):
+            f.seek(-1)
+        with pytest.raises(ValueError):
+            f.seek(0, 5)  # Invalid whence
+
+
+def test_tell_write(gcs):
+    fn = TEST_BUCKET + "/test_tell_write"
+    with gcs.open(fn, "wb") as f:
+        assert f.tell() == 0
+        f.write(b"abc")
+        assert f.tell() == 3
+        f.write(b"def")
+        assert f.tell() == 6
+
+        # seek is not allowed in write mode
+        with pytest.raises(OSError):
+            f.seek(0)
+
+
 def test_bad_open(gcs):
     with pytest.raises((IOError, OSError)):
         gcs.open("")
