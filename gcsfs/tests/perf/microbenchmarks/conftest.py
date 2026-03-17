@@ -68,7 +68,7 @@ def _benchmark_io_fixture_helper(
     gcs_kwargs = gcs_kwargs or {}
     gcs = extended_gcs_factory(**gcs_kwargs)
 
-    prefix = f"{params.bucket_name}/{prefix_tag}-{uuid.uuid4()}"
+    prefix = f"{params.bucket_name}/{prefix_tag}-files_{params.files}-size_{getattr(params, 'file_size_bytes', 0)}"
     file_paths = [f"{prefix}/file_{i}" for i in range(params.files)]
 
     action = "creating" if create_files else "targeting"
@@ -78,22 +78,23 @@ def _benchmark_io_fixture_helper(
     )
 
     if create_files:
-        start_time = time.perf_counter()
-        _prepare_files(gcs, file_paths, params.file_size_bytes)
+        if not gcs.exists(file_paths[0]):
+            start_time = time.perf_counter()
+            _prepare_files(gcs, file_paths, params.file_size_bytes)
 
-        duration_ms = (time.perf_counter() - start_time) * 1000
-        logging.info(
-            f"Benchmark '{params.name}' setup created {params.files} files in {duration_ms:.2f} ms."
-        )
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            logging.info(
+                f"Benchmark '{params.name}' setup created {params.files} files in {duration_ms:.2f} ms."
+            )
 
     yield gcs, file_paths, params
 
     # --- Teardown ---
-    logging.info(f"Tearing down benchmark '{params.name}': deleting files.")
-    try:
-        gcs.rm(prefix, recursive=True)
-    except Exception as e:
-        logging.error(f"Failed to clean up benchmark files: {e}")
+    # logging.info(f"Tearing down benchmark '{params.name}': deleting files.")
+    # try:
+    #     gcs.rm(prefix, recursive=True)
+    # except Exception as e:
+    #     logging.error(f"Failed to clean up benchmark files: {e}")
 
 
 @pytest.fixture
