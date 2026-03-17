@@ -1921,3 +1921,63 @@ def test_mv_file_raises_error_for_specific_generation(gcs):
             gcs.mv_file(src, dest)
     finally:
         gcs.version_aware = original_version_aware
+
+
+@pytest.mark.asyncio
+async def test_info_bucket_optimization(gcs):
+    bucket = "test-bucket"
+
+    # Mock _call to fail with OSError on GET b/test-bucket
+    # and mock _ls to return a list
+    with mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call:
+        mock_call.side_effect = OSError("Failed to GET bucket")
+        with mock.patch.object(gcs, "_ls", new_callable=mock.AsyncMock) as mock_ls:
+            mock_ls.return_value = ["test-bucket/"]
+
+            # Use await gcs._info as it is an async method
+            info = await gcs._info(bucket)
+
+            # Verify _call was called for the bucket GET
+            mock_call.assert_called_with("GET", f"b/{bucket}", json_out=True)
+
+            # Verify _ls was called with max_results=1
+            mock_ls.assert_awaited_once_with(bucket, max_results=1)
+
+            assert info == {"name": bucket, "size": 0, "type": "directory"}
+
+
+@pytest.mark.asyncio
+async def test_info_bucket_not_found_optimization(gcs):
+    bucket = "non-existent-bucket"
+
+    with mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call:
+        mock_call.side_effect = OSError("Failed to GET bucket")
+        with mock.patch.object(gcs, "_ls", new_callable=mock.AsyncMock) as mock_ls:
+            mock_ls.return_value = []
+
+            with pytest.raises(FileNotFoundError):
+                await gcs._info(bucket)
+
+            mock_ls.assert_awaited_once_with(bucket, max_results=1)
+
+
+@pytest.mark.asyncio
+async def test_info_bucket_success_parallel(gcs):
+    bucket = "test-bucket"
+
+    with mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call:
+        mock_call.return_value = {"name": bucket, "kind": "storage#bucket"}
+        with mock.patch.object(gcs, "_ls", new_callable=mock.AsyncMock) as mock_ls:
+            mock_ls.return_value = ["test-bucket/"]
+
+            info = await gcs._info(bucket)
+
+            mock_call.assert_called_with("GET", f"b/{bucket}", json_out=True)
+            mock_ls.assert_awaited_once_with(bucket, max_results=1)
+
+            assert info == {
+                "name": bucket,
+                "kind": "storage#bucket",
+                "size": 0,
+                "type": "directory",
+            }
