@@ -16,8 +16,3 @@ scenarios:
     pattern: "seq"
     processes: [1, 16, 48]
     files: 1
-
-  - name: "read_rand_fixed_duration"
-    pattern: "rand"
-    processes: [1, 16, 48]
-    files: 1
