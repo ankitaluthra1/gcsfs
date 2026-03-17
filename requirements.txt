@@ -4,5 +4,7 @@ fsspec==2026.2.0
 google-auth>=1.2
 google-auth-oauthlib
 google-cloud-storage>=3.9.0
+google-cloud-storage @ git+https://github.com/googlyrahman/python-storage.git@proto-wrapper
+grpcio @ git+https://github.com/googlyrahman/grpc.git@listbased
 google-cloud-storage-control
 requests

@@ -24,7 +24,7 @@ def _read_op_seq(gcs, file_paths, chunk_size, runtime):
     files_it = itertools.cycle(file_paths)
     while time.perf_counter() - start_time < runtime:
         path = next(files_it)
-        with gcs.open(path, "rb") as f:
+        with gcs.open(path, "rb", cache_type="prefetcher") as f:
             while time.perf_counter() - start_time < runtime:
                 data = f.read(chunk_size)
                 if not data:
@@ -40,7 +40,7 @@ def _read_op_rand(gcs, file_paths, chunk_size, offsets, runtime):
     files_it = itertools.cycle(file_paths)
     while time.perf_counter() - start_time < runtime:
         path = next(files_it)
-        with gcs.open(path, "rb", cache_type="none") as f:
+        with gcs.open(path, "rb", cache_type="prefetcher") as f:
             for offset in offsets:
                 if time.perf_counter() - start_time >= runtime:
                     break
