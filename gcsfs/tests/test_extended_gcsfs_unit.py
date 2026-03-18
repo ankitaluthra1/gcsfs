@@ -1,4 +1,5 @@
 # Unit tests for ExtendedGCSFileSystem.
+import contextlib
 import io
 import logging
 import os
@@ -578,3 +579,58 @@ async def test_get_file_exception_cleanup(
 
             # The local file should not exist after the failed download
             assert not lpath.exists()
+
+
+@pytest.mark.asyncio
+async def test_cat_file_mrd_pool_cache_lifecycle(extended_gcsfs, gcs_bucket_mocks):
+    """Test that _cat_file fetches from and releases to the MRD pool cache."""
+    with gcs_bucket_mocks(json_data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL):
+        mock_pool = mock.AsyncMock()
+        mock_pool.persisted_size = len(json_data)
+
+        @contextlib.asynccontextmanager
+        async def fake_get_mrd():
+            yield mock.AsyncMock()
+
+        mock_pool.get_mrd = fake_get_mrd
+
+        extended_gcsfs.mrd_pool_cache = mock.AsyncMock()
+        extended_gcsfs.mrd_pool_cache.get.return_value = mock_pool
+        extended_gcsfs.mrd_pool_cache.release = mock.AsyncMock()
+
+        with mock.patch("gcsfs.zb_hns_utils.download_range") as mock_download_range:
+            mock_download_range.return_value = json_data[:10]
+            await extended_gcsfs._cat_file(file_path, start=0, end=10)
+
+        extended_gcsfs.mrd_pool_cache.get.assert_called_once()
+        extended_gcsfs.mrd_pool_cache.release.assert_called_once_with(mock_pool)
+
+
+@pytest.mark.asyncio
+async def test_fetch_range_split_mrd_pool_cache_lifecycle(
+    extended_gcsfs, gcs_bucket_mocks
+):
+    """Test that _fetch_range_split fetches from and releases to the MRD pool cache."""
+    with gcs_bucket_mocks(json_data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL):
+        mock_pool = mock.AsyncMock()
+        mock_pool.persisted_size = len(json_data)
+
+        @contextlib.asynccontextmanager
+        async def fake_get_mrd():
+            mock_mrd = mock.AsyncMock()
+            mock_mrd.download_ranges = mock.AsyncMock()
+            yield mock_mrd
+
+        mock_pool.get_mrd = fake_get_mrd
+
+        extended_gcsfs.mrd_pool_cache = mock.AsyncMock()
+        extended_gcsfs.mrd_pool_cache.get.return_value = mock_pool
+        extended_gcsfs.mrd_pool_cache.release = mock.AsyncMock()
+
+        chunk_lengths = [10, 10]
+        await extended_gcsfs._fetch_range_split(
+            file_path, start=0, chunk_lengths=chunk_lengths
+        )
+
+        extended_gcsfs.mrd_pool_cache.get.assert_called_once()
+        extended_gcsfs.mrd_pool_cache.release.assert_called_once_with(mock_pool)

@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import contextlib
 import ctypes
 import logging
@@ -316,3 +317,132 @@ class MRDPool:
             await asyncio.gather(*tasks, return_exceptions=True)
         finally:
             self._all_mrds.clear()
+
+
+class MRDPoolCache:
+    """
+    Centralized manager for MRDPool instances.
+
+    This class maintains a cache of active and idle MRDPool.
+    Active pools are associated with an active reference count.
+    When the reference count drops to zero, the pool is moved to an idle LRU cache,
+    keeping it available for future use until the cache limit is reached.
+    """
+
+    def __init__(self, gcsfs, pool_size, max_idle_pools):
+        """
+        Initializes the MRDPoolCache.
+
+        Args:
+            gcsfs (gcsfs.core.GCSFileSystem): The GCS filesystem instance.
+            pool_size (int): The maximum number of concurrent downloaders allowed in each pool.
+            max_idle_pools (int): The maximum number of idle MRDPool instances to
+                keep in the LRU cache.
+        """
+        if max_idle_pools < 0:
+            raise ValueError("max_idle_pools cannot be negative")
+        if pool_size <= 0:
+            raise ValueError("pool_size must be positive")
+        self.gcsfs = gcsfs
+        self.pool_size = pool_size
+        self.max_idle_pools = max_idle_pools
+        self._active_pools = {}
+        self._ref_counts = {}
+        self._idle_pools = collections.OrderedDict()
+        self._lock = asyncio.Lock()
+
+    async def get(self, bucket_name, object_name, generation):
+        """
+        Requests an MRDPool from the cache or creates a new one.
+
+        If a pool for the specified object already exists (either active or idle),
+        its reference count is incremented, and it is returned. Otherwise, a new
+        MRDPool is created, initialized, and added to the active pools cache.
+
+        Args:
+            bucket_name (str): The name of the GCS bucket.
+            object_name (str): The name of the GCS object.
+            generation (str): The generation of the GCS object.
+
+        Returns:
+            MRDPool: The requested MRDPool instance.
+        """
+        key = (bucket_name, object_name, generation)
+
+        async with self._lock:
+            if key in self._active_pools:
+                # Increment reference count for existing active pool
+                self._ref_counts[key] += 1
+                pool = self._active_pools[key]
+            elif key in self._idle_pools:
+                # Re-activate pool from idle state
+                pool = self._idle_pools.pop(key)
+                self._active_pools[key] = pool
+                self._ref_counts[key] = 1
+                return pool
+            else:
+                # Create a new pool
+                pool = MRDPool(
+                    self.gcsfs, bucket_name, object_name, generation, self.pool_size
+                )
+                self._active_pools[key] = pool
+                self._ref_counts[key] = 1
+
+        await pool.initialize()
+        return pool
+
+    async def release(self, pool):
+        """
+        Releases an MRDPool back to the cache.
+
+        Decrements the reference count of the pool. If the reference count reaches
+        zero, the pool is moved from the active cache to the idle LRU cache. If the
+        idle cache exceeds `max_idle_pools`, the oldest idle pool is evicted and closed.
+
+        Args:
+            pool (MRDPool): The MRDPool instance to release. If None, the method
+                returns immediately without throwing an error.
+        """
+        if not pool:
+            return
+
+        key = (pool.bucket_name, pool.object_name, pool.generation)
+        pool_to_close = None
+
+        async with self._lock:
+            if key in self._active_pools:
+                self._ref_counts[key] -= 1
+                if self._ref_counts[key] == 0:
+                    # Move to idle pools
+                    del self._active_pools[key]
+                    del self._ref_counts[key]
+                    self._idle_pools[key] = pool
+
+                    # Enforce LRU size
+                    if len(self._idle_pools) > self.max_idle_pools:
+                        _, oldest_pool = self._idle_pools.popitem(last=False)
+                        pool_to_close = oldest_pool
+
+        if pool_to_close:
+            await pool_to_close.close()
+
+    async def close(self):
+        """
+        Closes all pools in the cache.
+
+        Safely closes all active and idle MRDPool instances concurrently, ensuring
+        that all resources are released and background tasks are finalized.
+        """
+        tasks = []
+        async with self._lock:
+            for pool in self._active_pools.values():
+                tasks.append(pool.close())
+            for pool in self._idle_pools.values():
+                tasks.append(pool.close())
+
+        try:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            self._active_pools.clear()
+            self._ref_counts.clear()
+            self._idle_pools.clear()
