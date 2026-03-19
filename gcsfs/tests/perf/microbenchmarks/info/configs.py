@@ -5,6 +5,14 @@ from gcsfs.tests.perf.microbenchmarks.listing.configs import ListingConfigurator
 class InfoConfigurator(ListingConfigurator):
     param_class = InfoBenchmarkParameters
 
+    def build_cases(self, scenario, common_config):
+        cases = super().build_cases(scenario, common_config)
+        impersonate_sa = scenario.get("impersonate_sa")
+        if impersonate_sa:
+            for case in cases:
+                case.impersonate_sa = impersonate_sa
+        return cases
+
     def _get_folders_list(self, scenario, common_config):
         return common_config.get("folders", [1])
 

@@ -26,3 +26,12 @@ scenarios:
     pattern: "info"
     depth: 10
     processes: [4, 8]
+
+  # Tests the fallback logic in _info() when GET bucket fails (e.g., restricted permissions).
+  # Setup creates 100 files/folders using Admin credentials, then benchmark runs with SA token.
+  # Requires the impersonated SA to have at least 'roles/storage.objectViewer' on the bucket.
+  - name: "info_restricted_bucket"
+    pattern: "info"
+    depth: 1
+    target_types: ["bucket"]
+    impersonate_sa: "parallel-info-tester@gcs-aiml-clients-testing-101.iam.gserviceaccount.com"
