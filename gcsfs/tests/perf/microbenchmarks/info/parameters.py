@@ -13,3 +13,6 @@ class InfoBenchmarkParameters(ListingBenchmarkParameters):
 
     # The type of target to query: "bucket", "folder", or "file".
     target_type: str
+
+    # The service account to impersonate for the benchmark.
+    impersonate_sa: str = None
