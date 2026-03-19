@@ -104,7 +104,7 @@ Performance Benchmarks
 Rapid Storage via gRPC significantly improves read and write performance compared to standard HTTP regional buckets.
 Here are the microbenchmarks
 Rapid drastically outperform standard buckets across different read patterns, including both sequential and random reads, as well as for writes.
-To reproduce using more combinations, please see `gcsfs/perf/micrbenchmarks`
+To reproduce using more combinations, please see `gcsfs/perf/microbenchmarks`
 
 .. list-table:: **Sequential Reads**
    :header-rows: 1
