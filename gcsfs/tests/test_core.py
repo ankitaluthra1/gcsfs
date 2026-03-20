@@ -491,6 +491,7 @@ def test_rm_wildcards_and_lists(gcs):
     assert not gcs.exists(files[0])
     assert not gcs.exists(files[1])
     assert gcs.exists(files[2])
+    assert gcs.exists(files[5])
 
     # 2. Test list of patterns with '*' wildcards (non-recursive)
     gcs.rm([f"{base_dir}/a*", f"{base_dir}/b*"])
