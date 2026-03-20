@@ -1034,6 +1034,8 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         For buckets with flat structure, it falls back to the parent implementation.
         """
         path = self._strip_protocol(path)
+        if maxdepth is not None and maxdepth < 1:
+            raise ValueError("maxdepth must be at least 1")
         bucket, _, _ = self.split_path(path)
 
         is_hns = await self._is_bucket_hns_enabled(bucket)
