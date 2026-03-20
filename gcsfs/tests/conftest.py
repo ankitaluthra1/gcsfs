@@ -533,7 +533,7 @@ def patch_grpc_client_options():
                 client_options = ClientOptions(api_endpoint="storage.googleapis.com")
 
             self._grpc_client = AsyncGrpcClient(
-                credentials=self.credentials,
+                credentials=self.credential,
                 client_options=client_options,
                 client_info=ClientInfo(user_agent=f"{USER_AGENT}/{__version__}"),
             )
