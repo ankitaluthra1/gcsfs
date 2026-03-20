@@ -992,7 +992,8 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 e
                 for e in errors
                 if not (
-                    isinstance(e, OSError) and "folder you tried to delete is not empty" in str(e)
+                    isinstance(e, OSError)
+                    and "folder you tried to delete is not empty" in str(e)
                 )
             ]
 
