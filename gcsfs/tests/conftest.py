@@ -509,3 +509,38 @@ def pytest_ignore_collect(collection_path, config):
                     return True
 
     return None
+
+
+@pytest.fixture(autouse=True)
+def patch_grpc_client_options():
+    import urllib.parse
+
+    from google.api_core.client_info import ClientInfo
+    from google.api_core.client_options import ClientOptions
+    from google.cloud.storage.asyncio.async_grpc_client import AsyncGrpcClient
+
+    from gcsfs import __version__
+    from gcsfs.extended_gcsfs import USER_AGENT
+
+    async def mocked_get_grpc_client(self):
+        if self._grpc_client is None:
+            client_options = None
+            if self._endpoint:
+                parsed = urllib.parse.urlparse(self._endpoint)
+                endpoint = parsed.netloc if parsed.netloc else parsed.path
+                client_options = ClientOptions(api_endpoint=endpoint)
+            elif self.credentials.token == "anon":
+                client_options = ClientOptions(api_endpoint="storage.googleapis.com")
+
+            self._grpc_client = AsyncGrpcClient(
+                credentials=self.credentials,
+                client_options=client_options,
+                client_info=ClientInfo(user_agent=f"{USER_AGENT}/{__version__}"),
+            )
+        return self._grpc_client
+
+    with mock.patch(
+        "gcsfs.extended_gcsfs.ExtendedGcsFileSystem._get_grpc_client",
+        new=mocked_get_grpc_client,
+    ):
+        yield
