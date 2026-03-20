@@ -2062,3 +2062,35 @@ async def test_info_bucket_success_parallel(gcs):
                 "size": 0,
                 "type": "directory",
             }
+
+
+@pytest.mark.asyncio
+async def test_info_bucket_ls_exception(gcs):
+    bucket = "test-bucket"
+
+    with mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call:
+        mock_call.side_effect = OSError("Failed to GET bucket")
+        with mock.patch.object(gcs, "_ls", new_callable=mock.AsyncMock) as mock_ls:
+            mock_ls.side_effect = ValueError("LS error")
+
+            with pytest.raises(ValueError, match="LS error"):
+                await gcs._info(bucket)
+
+            mock_call.assert_called_with("GET", f"b/{bucket}", json_out=True)
+            mock_ls.assert_awaited_once_with(bucket, max_results=1)
+
+
+@pytest.mark.asyncio
+async def test_info_bucket_other_exception(gcs):
+    bucket = "test-bucket"
+
+    with mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call:
+        mock_call.side_effect = ValueError("Some other error")
+        with mock.patch.object(gcs, "_ls", new_callable=mock.AsyncMock) as mock_ls:
+            mock_ls.return_value = ["test-bucket/"]
+
+            with pytest.raises(ValueError, match="Some other error"):
+                await gcs._info(bucket)
+
+            mock_call.assert_called_with("GET", f"b/{bucket}", json_out=True)
+            mock_ls.assert_awaited_once_with(bucket, max_results=1)
