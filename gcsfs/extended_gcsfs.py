@@ -10,6 +10,7 @@ from fsspec import asyn
 from fsspec.callbacks import NoOpCallback
 from google.api_core import exceptions as api_exceptions
 from google.api_core.client_info import ClientInfo
+from google.api_core.client_options import ClientOptions
 from google.auth.credentials import AnonymousCredentials
 from google.cloud import storage_control_v2
 from google.cloud.storage.asyncio.async_appendable_object_writer import (
@@ -80,9 +81,15 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
     async def _get_grpc_client(self):
         if self._grpc_client is None:
+            client_options = None
+            if self._location:
+                # client_options expects only the host:port, without the protocol.
+                endpoint = self._location.split("://")[-1]
+                client_options = ClientOptions(api_endpoint=endpoint)
             self._grpc_client = AsyncGrpcClient(
                 credentials=self.credential,
                 client_info=ClientInfo(user_agent=f"{USER_AGENT}/{version}"),
+                client_options=client_options,
             )
         return self._grpc_client
 
