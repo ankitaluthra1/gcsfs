@@ -110,23 +110,23 @@ To reproduce using more combinations, please see `gcsfs/perf/microbenchmarks`
    :header-rows: 1
 
    * - IO Size
-     - Streams
+     - Processes
      - Rapid (MB/s)
      - Standard (MB/s)
    * - 1 MB
-     - Single Stream
+     - Single Process
      - 469.09
      - 37.76
    * - 16 MB
-     - Single Stream
+     - Single Process
      - 628.59
      - 64.50
    * - 1 MB
-     - 48 Streams
+     - 48 Processes
      - 16932
      - 2202
    * - 16 MB
-     - 48 Streams
+     - 48 Processes
      - 19213.27
      - 4010.50
 
@@ -134,23 +134,23 @@ To reproduce using more combinations, please see `gcsfs/perf/microbenchmarks`
    :header-rows: 1
 
    * - IO Size
-     - Streams
+     - Processes
      - Rapid Throughput (MB/s)
      - Standard (MB/s)
    * - 64 KB
-     - Single Stream
+     - Single Process
      - 39
      - 0.77
    * - 16 MB
-     - Single Stream
+     - Single Process
      - 602.12
      - 66.92
    * - 64 KB
-     - 48 Streams
+     - 48 Processes
      - 2081
      - 51
    * - 16 MB
-     - 48 Streams
+     - 48 Processes
      - 21448
      - 4504
 
@@ -159,15 +159,15 @@ To reproduce using more combinations, please see `gcsfs/perf/microbenchmarks`
    :header-rows: 1
 
    * - IO Size
-     - Streams
+     - Processes
      - Zonal Bucket
      - Regional Bucket
    * - 16 MB
-     - Single Stream
+     - Single Process
      - 326
      - 100
    * - 16 MB
-     - 48 Streams
+     - 48 Processes
      - 13418
      - 4722
 
@@ -177,24 +177,30 @@ Multiprocessing and gRPC
 Because `gcsfs` relies on gRPC to interact with Rapid storage, developers must be careful when using multiprocessing. Users use libraries such as multiprocessing, subprocess, concurrent.futures.ProcessPoolExecutor, etc, to work around the GIL. These modules call `fork()` underneath the hood.
 
 However, gRPC Python wraps gRPC core, which uses internal multithreading for performance, and hence doesn't support `fork()`.
-Using `fork()` for multi-processing can lead to hangs or segmentation faults when child processes attempt to use the network layer.
+Using `fork()` for multi-processing can lead to hangs or segmentation faults when child processes attempt to use the network layer
+where the application creates gRPC Python objects (e.g., client channel)before invoking `fork()`. However, if the application only
+instantiate gRPC Python objects after calling `fork()`, then `fork()` will work normally, since there is no C extension binding at this point.
 
-**The Fix: Use `spawn` instead of `fork`**
+**Alternative: Use `forkserver` or `spawn` instead of `fork`**
 
-To resolve this, the safest option will be to use `spawn` instead of `fork` where the child process will create their own grpc connection.
-
-You can configure Python's `multiprocessing` module to use the `spawn` start method as shown in the snippet below.
+To resolve `fork` issue, you can use `forkserver` or `spawn` instead of `fork` where the child process will create their own grpc connection.
+You can configure Python's `multiprocessing` module to override the start method as shown in the snippet below.
 For example while using data loaders in frameworks like PyTorch
-(e.g., `torch.utils.data.DataLoader` with `num_workers > 0`) alongside `gcsfs` with Rapid storage, you should add `spawn` as start method:
+(e.g., `torch.utils.data.DataLoader` with `num_workers > 0`) alongside `gcsfs` with Rapid storage:
 
 .. code-block:: python
 
+    # Use forkserver
     import torch.multiprocessing
     # This must be done before other imports or initialization
     try:
-      torch.multiprocessing.set_start_method('spawn', force=True)
+      torch.multiprocessing.set_start_method('forkserver', force=True)
+      # or use torch.multiprocessing.set_start_method('forkserver', force=True)
     except RuntimeError:
       pass # Context already set
+
+* **forkserver (Recommended for Performance):** Starts a single, clean server process at the beginning of your program. Subsequent workers are forked from this clean state. This is much faster than `spawn` because it avoids re-initializing the Python interpreter and re-importing libraries for every worker. Note that `forkserver` is only available on Unix platforms.
+* **spawn (Recommended for Maximum Safety/Compatibility):** Starts a completely fresh Python interpreter for each worker. While this incurs a high startup latency and memory overhead ("import tax"), it is 100% immune to inheriting locked mutexes from background threads. It is also fully cross-platform (works on Windows).
 
 Important Differences to Keep in Mind
 -------------------------------------
