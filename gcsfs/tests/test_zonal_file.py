@@ -52,8 +52,13 @@ def test_zonal_file_write_success(extended_gcsfs, zonal_write_mocks, file_path):
     data1 = b"first part "
     data2 = b"second part"
     with extended_gcsfs.open(file_path, "wb", finalize_on_close=True) as f:
-        f.write(data1)
-        f.write(data2)
+        bytes_written1 = f.write(data1)
+        assert bytes_written1 == len(data1)
+        assert f.loc == len(data1)
+
+        bytes_written2 = f.write(data2)
+        assert bytes_written2 == len(data2)
+        assert f.loc == len(data1) + len(data2)
 
     if zonal_write_mocks:
         zonal_write_mocks["aaow"].append.assert_has_awaits(
@@ -156,6 +161,26 @@ def test_zonal_file_flush(extended_gcsfs, zonal_write_mocks, file_path):
 
     if zonal_write_mocks:
         zonal_write_mocks["aaow"].flush.assert_awaited()
+
+
+def test_zonal_file_lazy_init_creates_empty_file_on_close(
+    extended_gcsfs, zonal_write_mocks, file_path
+):
+    """Test that opening a file does not immediately create it on the server (lazy init),
+    but empty file is created when the file is closed."""
+    f = extended_gcsfs.open(file_path, "wb")
+    assert f.aaow is None  # AAOW should not be initialized since no data is written
+
+    if zonal_write_mocks:
+        zonal_write_mocks["init_aaow"].assert_not_called()
+    else:
+        assert not extended_gcsfs.exists(file_path)
+    f.close()
+
+    if zonal_write_mocks:
+        zonal_write_mocks["init_aaow"].assert_awaited_once()
+    else:
+        assert extended_gcsfs.exists(file_path)
 
 
 def test_zonal_file_commit(extended_gcsfs, zonal_write_mocks, file_path):

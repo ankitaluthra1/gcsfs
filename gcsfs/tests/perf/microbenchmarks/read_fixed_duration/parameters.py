@@ -4,9 +4,9 @@ from gcsfs.tests.perf.microbenchmarks.parameters import IOBenchmarkParameters
 
 
 @dataclass
-class ReadBenchmarkParameters(IOBenchmarkParameters):
+class ReadFixedDurationBenchmarkParameters(IOBenchmarkParameters):
     """
-    Defines the parameters for a read benchmark test cases.
+    Defines the parameters for a read benchmark test cases with runtime.
     """
 
     # Read pattern: "seq" for sequential, "rand" for random.
@@ -14,3 +14,6 @@ class ReadBenchmarkParameters(IOBenchmarkParameters):
 
     # The block size for gcsfs file buffering default to 16MB.
     block_size_bytes: int
+
+    # Time in seconds the test should run.
+    runtime: int

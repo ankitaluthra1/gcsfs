@@ -1,12 +1,31 @@
 import logging
 from io import BytesIO
 
+from google.api_core.exceptions import NotFound
 from google.cloud.storage.asyncio.async_appendable_object_writer import (
     _DEFAULT_FLUSH_INTERVAL_BYTES,
     AsyncAppendableObjectWriter,
 )
+from google.cloud.storage.asyncio.async_multi_range_downloader import (
+    AsyncMultiRangeDownloader,
+)
 
 logger = logging.getLogger("gcsfs")
+
+
+async def init_mrd(grpc_client, bucket_name, object_name, generation=None):
+    """
+    Creates the AsyncMultiRangeDownloader using an existing client.
+    Wraps Google API errors into standard Python exceptions.
+    """
+    try:
+        return await AsyncMultiRangeDownloader.create_mrd(
+            grpc_client, bucket_name, object_name, generation
+        )
+    except NotFound:
+        # We wrap the error here to match standard Python error handling
+        # and avoid leaking Google API exceptions to users.
+        raise FileNotFoundError(f"{bucket_name}/{object_name}")
 
 
 async def download_range(offset, length, mrd):
@@ -45,3 +64,31 @@ async def init_aaow(
     )
     await writer.open()
     return writer
+
+
+async def close_mrd(mrd):
+    """
+    Closes the AsyncMultiRangeDownloader gracefully.
+    Logs a warning if closing fails, instead of raising an exception.
+    """
+    if mrd:
+        try:
+            await mrd.close()
+        except Exception as e:
+            logger.warning(
+                f"Error closing AsyncMultiRangeDownloader for {mrd.bucket_name}/{mrd.object_name}: {e}"
+            )
+
+
+async def close_aaow(aaow, finalize_on_close=False):
+    """
+    Closes the AsyncAppendableObjectWriter gracefully.
+    Logs a warning if closing fails, instead of raising an exception.
+    """
+    if aaow:
+        try:
+            await aaow.close(finalize_on_close=finalize_on_close)
+        except Exception as e:
+            logger.warning(
+                f"Error closing AsyncAppendableObjectWriter for {aaow.bucket_name}/{aaow.object_name}: {e}"
+            )

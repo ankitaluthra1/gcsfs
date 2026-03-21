@@ -38,22 +38,26 @@ The benchmarks use a set of parameter classes to define the configuration for ea
 *   **Read Parameters**: Specific to Read operations (extends IO Parameters).
     *   `pattern`: Read pattern ("seq" for sequential, "rand" for random).
     *   `block_size_bytes`: Block size for GCSFS file buffering.
+    *   `runtime`: Duration in seconds for the benchmark to run.
 
-*   **Listing Parameters**: Specific to Listing, Delete, and Rename operations.
+*   **Listing Parameters**: Specific to Listing, Delete, Rename, and Info operations.
     *   `depth`: Directory depth.
     *   `folders`: Number of folders.
     *   `pattern`: Listing pattern (e.g., "ls", "find").
+
+*   **Info Parameters**: Specific to Info operations (extends Listing Parameters).
+    *    `target_type`: The type of target to query: "bucket", "folder", or "file".
 
 ## Configuration
 
 Configuration values are stored in YAML files (e.g., `configs.yaml`) located within each benchmark's directory. These files define:
 
-*   **Common**: Shared settings like bucket types, file sizes, or rounds.
+*   **Common**: Shared settings like bucket types, file sizes, rounds, or runtime.
 *   **Scenarios**: Specific test scenarios defining variations in threads, processes, patterns, etc.
 
 ## Configurators
 
-Configurators are Python classes (e.g., `ReadConfigurator`, `ListingConfigurator`) responsible for parsing the YAML configuration files and converting them into a list of parameter objects (`BenchmarkParameters`). These objects are then consumed by the test files to generate parameterized test cases.
+Configurators are Python classes (e.g., `ReadFixedDurationConfigurator`, `ListingConfigurator`) responsible for parsing the YAML configuration files and converting them into a list of parameter objects (`BenchmarkParameters`). These objects are then consumed by the test files to generate parameterized test cases.
 
 ## Benchmark File
 
@@ -73,7 +77,7 @@ The `run.py` script is the central entry point for executing benchmarks. It hand
 
 | Option | Description | Required |
 | :--- | :--- | :--- |
-| `--group` | The benchmark group to run (e.g., `read`, `write`, `listing`). Runs all groups if not specified. | No |
+| `--group` | The benchmark group to run (e.g., `read`, `write`, `read_fixed_duration`, `write_fixed_duration`, `listing`, `info`). Runs all groups if not specified. | No |
 | `--config` | Specific scenario names to run (e.g., `read_seq`, `list_flat`). Accepts multiple values. | No |
 | `--regional-bucket` | Name of the regional GCS bucket. | Yes* |
 | `--zonal-bucket` | Name of the zonal GCS bucket. | Yes* |
