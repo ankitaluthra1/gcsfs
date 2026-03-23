@@ -18,6 +18,19 @@ def test_googlecredentials_none():
     credentials.apply(headers)
 
 
+def test_connect_google_default_uses_request():
+    with patch("gcsfs.credentials.gauth.default") as mock_default:
+        mock_default.return_value = (Mock(), "my-project")
+        _ = GoogleCredentials(project=None, token="google_default", access="read_only")
+
+        # Check if gauth.default was called with a 'request' argument
+        _, kwargs = mock_default.call_args
+        assert "request" in kwargs
+        from google.auth.transport.requests import Request
+
+        assert isinstance(kwargs["request"], Request)
+
+
 @pytest.mark.parametrize("token", ["", "incorrect.token", "x" * 100])
 def test_credentials_from_raw_token(token):
     with patch.dict(os.environ, {"FETCH_RAW_TOKEN_EXPIRY": "false"}):
