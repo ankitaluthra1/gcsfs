@@ -21,12 +21,13 @@ def test_googlecredentials_none():
 def test_connect_google_default_uses_request():
     with patch("gcsfs.credentials.gauth.default") as mock_default:
         mock_default.return_value = (Mock(), "my-project")
-        creds = GoogleCredentials(project=None, token="google_default", access="read_only")
-        
+        _ = GoogleCredentials(project=None, token="google_default", access="read_only")
+
         # Check if gauth.default was called with a 'request' argument
-        args, kwargs = mock_default.call_args
+        _, kwargs = mock_default.call_args
         assert "request" in kwargs
         from google.auth.transport.requests import Request
+
         assert isinstance(kwargs["request"], Request)
 
 
