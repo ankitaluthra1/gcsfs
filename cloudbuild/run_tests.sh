@@ -2,6 +2,10 @@
 set -e
 source env/bin/activate
 
+# Disable mTLS for Metadata Server discovery to avoid HTTPS scheme errors
+# in google-auth's default http.client transport.
+export GCE_METADATA_MTLS_MODE=none
+
 # Common Exports
 export STORAGE_EMULATOR_HOST=https://storage.googleapis.com
 export GCSFS_TEST_PROJECT=${PROJECT_ID}
