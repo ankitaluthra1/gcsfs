@@ -2056,46 +2056,66 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
 
     def write(self, data):
         if self.closed:
-            raise ValueError("I/O operation on closed file")
+            raise ValueError(
+                "I/O operation on closed file"
+            )  # CITATION: raise ValueError("I/O operation on closed file")
         if not data:
             return 0
 
         # Optimization for large writes
-        if len(data) >= self.blocksize and os.environ.get("GCSFS_OPTIMIZED_WRITE", "false").lower() == "true":
+        if len(data) >= 2 * self.blocksize:
+            print("Using new write")
+
+            # Flush any existing standard buffer data
             if self.buffer.tell() > 0:
                 self.flush()
-            if self.location is None:
-                self._initiate_upload()
-
-            # Initialize offset if needed
-            if getattr(self, "offset", None) is None:
-                self.offset = 0
 
             chunksize = GCS_MAX_BLOCK_SIZE
             mv = memoryview(data)
             n = len(data)
-            offset = 0
+            data_offset = 0
 
-            while offset < n:
-                remaining = n - offset
-                if remaining >= chunksize:
-                    chunk = mv[offset : offset + chunksize]
-                    # Direct upload of chunk
-                    self.buffer = UnclosableBytesIO(chunk)
-                    self._upload_chunk(final=False)
+            while data_offset < n:
+                # Seek to end to measure any small shortfall left behind by a previous _upload_chunk
+                self.buffer.seek(0, 2)
+                shortfall_size = self.buffer.tell()
 
-                    # Handle shortfall/buffer state
-                    if self.buffer.getvalue():
-                        # Buffer has data (shortfall). Append rest of data to buffer
-                        self.buffer.write(mv[offset + chunksize :])
-                        break
+                needed = chunksize - shortfall_size
+                remaining = n - data_offset
 
-                    offset += chunksize
+                if remaining >= needed:
+                    chunk = mv[data_offset : data_offset + needed]
+
+                    if shortfall_size == 0:
+                        # Clean slate: zero-copy memoryview assignment
+                        self.buffer = UnclosableBytesIO(chunk)
+                    else:
+                        # Shortfall recovery: Append missing bytes to reach chunksize safely
+                        if not hasattr(self.buffer, "_unclosable"):
+                            self.buffer = UnclosableBytesIO(self.buffer.getvalue())
+                            self.buffer.seek(0, 2)
+                        self.buffer.write(chunk)
+
+                    # Move cursor to end so flush() recognizes the buffer has data
+                    self.buffer.seek(0, 2)
+
+                    # flush() natively handles _initiate_upload and _upload_chunk safely
+                    self.flush()
+
+                    data_offset += needed
                 else:
                     # Buffer remainder
-                    self.buffer.write(mv[offset:])
+                    print("Not using optimised write")
+
+                    if not hasattr(self.buffer, "_unclosable"):
+                        self.buffer = UnclosableBytesIO(self.buffer.getvalue())
+                        self.buffer.seek(0, 2)
+
+                    self.buffer.write(mv[data_offset:])
+
                     if self.buffer.tell() >= self.blocksize:
                         self.flush()
+
                     break
 
             return n
