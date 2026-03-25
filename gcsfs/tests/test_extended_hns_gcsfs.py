@@ -2061,3 +2061,36 @@ class TestExtendedGcsFileSystemRm:
             mocks["control_client"].delete_folder.assert_called_once_with(
                 request=expected_request
             )
+
+    def test_rm_wildcard_non_recursive_on_non_empty_dir_ignores_error(
+        self, gcs_hns, gcs_hns_mocks
+    ):
+        """Test that rm with wildcard without recursive=True on a non-empty directory ignores error."""
+        gcsfs = gcs_hns
+        dir_path = f"{TEST_HNS_BUCKET}/non_empty_dir"
+        wildcard_path = f"{TEST_HNS_BUCKET}/*"
+
+        mock_expand = mock.AsyncMock()
+
+        with (
+            gcs_hns_mocks(BucketType.HIERARCHICAL, gcsfs) as mocks,
+            mock.patch.object(gcsfs, "_expand_path_with_details", new=mock_expand),
+        ):
+            # Mock expand_path to return the directory
+            mock_expand.return_value = [{"name": dir_path, "type": "directory"}]
+
+            # Mock delete_folder to raise FailedPrecondition (directory not empty)
+            mocks["control_client"].delete_folder.side_effect = (
+                api_exceptions.FailedPrecondition("Directory not empty")
+            )
+
+            # This should NOT raise OSError because it has a wildcard and the cause is FailedPrecondition
+            gcsfs.rm(wildcard_path, recursive=False)
+
+            mock_expand.assert_called_once_with(
+                wildcard_path, recursive=False, maxdepth=None, detail=True
+            )
+            expected_request = self._get_delete_folder_request(gcsfs, dir_path)
+            mocks["control_client"].delete_folder.assert_called_once_with(
+                request=expected_request
+            )

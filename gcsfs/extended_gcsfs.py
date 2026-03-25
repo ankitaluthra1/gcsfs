@@ -993,7 +993,8 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 for e in errors
                 if not (
                     isinstance(e, OSError)
-                    and "folder you tried to delete is not empty" in str(e)
+                    and "not empty" in str(e)
+                    and isinstance(e.__cause__, api_exceptions.FailedPrecondition)
                 )
             ]
 
