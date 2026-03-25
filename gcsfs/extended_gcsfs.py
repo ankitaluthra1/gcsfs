@@ -194,9 +194,6 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
         Returns:
             tuple: A tuple containing (offset, length).
-
-        Raises:
-            ValueError: If the calculated range is invalid.
         """
         size = file_size
 
@@ -204,7 +201,8 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             offset = 0
         elif start < 0:
             size = (await self._info(path))["size"] if size is None else size
-            offset = size + start
+            # If start is negative and larger than the file size, we should start from 0.
+            offset = max(0, size + start)
         else:
             offset = start
 
@@ -217,14 +215,9 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         else:
             effective_end = end
 
-        if offset < 0:
-            raise ValueError(f"Calculated start offset ({offset}) cannot be negative.")
-        if effective_end < offset:
-            raise ValueError(
-                f"Calculated end position ({effective_end}) cannot be before start offset ({offset})."
-            )
-        elif effective_end == offset:
-            length = 0  # Handle zero-length slice
+        # If the requested end is before/ same as the start, return empty.
+        if effective_end <= offset:
+            return offset, 0
         else:
             length = effective_end - offset  # Normal case
             size = (await self._info(path))["size"] if size is None else size
@@ -272,7 +265,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             file_size = size or mrd.persisted_size
             if file_size is None:
                 logger.warning(
-                    "AsyncMultiRangeDownloader (MRD) has no 'persisted_size'. "
+                    f"AsyncMultiRangeDownloader (MRD) for {path} has no 'persisted_size'. "
                     "Falling back to _info() to get the file size."
                 )
                 file_size = (await self._info(path))["size"]
@@ -301,6 +294,14 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
                 if read_ranges:
                     await mrd.download_ranges(read_ranges)
+                    logger.debug(
+                        "Requested ranges from mrd: %s",
+                        [(r[0], r[1]) for r in read_ranges],
+                    )
+                    logger.debug(
+                        "total bytes requested from mrd: %d",
+                        sum(r[1] for r in read_ranges),
+                    )
 
                 return [b.getvalue() for b in buffers]
             else:
@@ -352,7 +353,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             file_size = mrd.persisted_size
             if file_size is None:
                 logger.warning(
-                    "AsyncMultiRangeDownloader (MRD) exists but has no 'persisted_size'. "
+                    f"AsyncMultiRangeDownloader (MRD) for {path} has no 'persisted_size'. "
                     "Falling back to _info() to get the file size. "
                     "This may result in incorrect behavior for unfinalized objects."
                 )
@@ -1271,7 +1272,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             size = mrd.persisted_size
             if size is None:
                 logger.warning(
-                    "AsyncMultiRangeDownloader (MRD) has no 'persisted_size'. "
+                    f"AsyncMultiRangeDownloader (MRD) for {rpath} has no 'persisted_size'. "
                     "Falling back to _info() to get the file size. "
                     "This may result in incorrect behavior for unfinalized objects."
                 )
