@@ -1321,7 +1321,6 @@ class TestExtendedGcsFileSystemInternal:
         """Verifies that _get_bucket_type utilizes execute_with_timebound_retry."""
         fs = ExtendedGcsFileSystem(token="anon")
         mock_client = mock.AsyncMock()
-        fs._get_control_plane_client = mock.AsyncMock(return_value=mock_client)
 
         # Mock get_storage_layout to fail once then succeed.
         mock_client.get_storage_layout.side_effect = [
@@ -1331,7 +1330,12 @@ class TestExtendedGcsFileSystemInternal:
             ),
         ]
 
-        with mock.patch("gcsfs.retry.asyncio.sleep", new_callable=mock.AsyncMock):
+        with (
+            mock.patch.object(
+                fs, "_get_control_plane_client", return_value=mock_client
+            ),
+            mock.patch("gcsfs.retry.asyncio.sleep", new_callable=mock.AsyncMock),
+        ):
             bucket_type = await fs._get_bucket_type("my-bucket")
 
         # Verify that the method utilized the custom timebound wrapper.
