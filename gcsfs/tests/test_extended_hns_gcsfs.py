@@ -202,7 +202,7 @@ class TestExtendedGcsFileSystemMv:
 
             expected_request = self._get_rename_folder_request(path1, path2)
             mocks["control_client"].rename_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             # Verify that the operation result was awaited
             mocks[
@@ -285,7 +285,7 @@ class TestExtendedGcsFileSystemMv:
                 path1_no_proto, path2_no_proto
             )
             mocks["control_client"].rename_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             # Verify that the operation result was awaited
             mocks[
@@ -323,7 +323,7 @@ class TestExtendedGcsFileSystemMv:
             mocks["info"].assert_has_awaits(expected_info_calls)
             expected_request = self._get_rename_folder_request(path1, path2)
             mocks["control_client"].rename_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             # Verify that the operation result was awaited
             mocks[
@@ -483,7 +483,7 @@ class TestExtendedGcsFileSystemMv:
                 request_id=FIXED_REQUEST_ID,
             )
             mocks["control_client"].rename_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             # Verify that the operation result was awaited
             mocks[
@@ -536,7 +536,7 @@ class TestExtendedGcsFileSystemMv:
 
             expected_request = self._get_rename_folder_request(path1, path2)
             mocks["control_client"].rename_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             mocks["info"].assert_awaited_with(path1)
             mocks["super_mv"].assert_not_called()
@@ -577,7 +577,7 @@ class TestExtendedGcsFileSystemMv:
 
             expected_request = self._get_rename_folder_request(path1, path2)
             mocks["control_client"].rename_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             mocks["info"].assert_awaited_with(path1)
             mocks["super_mv"].assert_not_called()
@@ -607,7 +607,7 @@ class TestExtendedGcsFileSystemMv:
 
             expected_request = self._get_rename_folder_request(path1, path2)
             mocks["control_client"].rename_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             mocks["info"].assert_awaited_with(path1)
             mocks["super_mv"].assert_not_called()
@@ -712,7 +712,7 @@ class TestExtendedGcsFileSystemMkdir:
             mocks["async_lookup_bucket_type"].assert_called_once_with(TEST_HNS_BUCKET)
             expected_request = self._get_create_folder_request(dir_path)
             mocks["control_client"].create_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             mocks["super_mkdir"].assert_not_called()
 
@@ -765,7 +765,7 @@ class TestExtendedGcsFileSystemMkdir:
             mocks["async_lookup_bucket_type"].assert_called_once_with(TEST_HNS_BUCKET)
             expected_request = self._get_create_folder_request(dir_path, recursive=True)
             mocks["control_client"].create_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             mocks["super_mkdir"].assert_not_called()
 
@@ -789,7 +789,7 @@ class TestExtendedGcsFileSystemMkdir:
             mocks["async_lookup_bucket_type"].assert_called_once_with(TEST_HNS_BUCKET)
             expected_request = self._get_create_folder_request(dir_path)
             mocks["control_client"].create_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             mocks["super_mkdir"].assert_not_called()
 
@@ -889,7 +889,7 @@ class TestExtendedGcsFileSystemMkdir:
             # After the bucket is created, the HNS path is taken to create the folder.
             expected_request = self._get_create_folder_request(dir_path, recursive=True)
             mocks["control_client"].create_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             mocks["async_lookup_bucket_type"].assert_not_called()
 
@@ -984,7 +984,7 @@ class TestExtendedGcsFileSystemMkdir:
 
             expected_request = self._get_create_folder_request(dir_path)
             mocks["control_client"].create_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             mocks["super_mkdir"].assert_not_called()
             mocks["async_lookup_bucket_type"].assert_called_once_with(TEST_HNS_BUCKET)
@@ -1672,7 +1672,7 @@ class TestExtendedGcsFileSystemRmdir:
             mocks["async_lookup_bucket_type"].assert_called_once_with(TEST_HNS_BUCKET)
             expected_request = self._get_delete_folder_request(dir_path)
             mocks["control_client"].delete_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             mocks["super_rmdir"].assert_not_called()
 
@@ -1710,7 +1710,7 @@ class TestExtendedGcsFileSystemRmdir:
             mocks["async_lookup_bucket_type"].assert_called_once_with(TEST_HNS_BUCKET)
             expected_request = self._get_delete_folder_request(dir_path)
             mocks["control_client"].delete_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             mocks["super_rmdir"].assert_not_called()
 
@@ -1731,7 +1731,7 @@ class TestExtendedGcsFileSystemRmdir:
             mocks["async_lookup_bucket_type"].assert_called_once_with(TEST_HNS_BUCKET)
             expected_request = self._get_delete_folder_request(dir_path)
             mocks["control_client"].delete_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             mocks["super_rmdir"].assert_not_called()
 
@@ -1756,7 +1756,7 @@ class TestExtendedGcsFileSystemRmdir:
             mocks["async_lookup_bucket_type"].assert_called_once_with(TEST_HNS_BUCKET)
             expected_request = self._get_delete_folder_request(file_path)
             mocks["control_client"].delete_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             mocks["super_rmdir"].assert_not_called()
 
@@ -1783,7 +1783,7 @@ class TestExtendedGcsFileSystemRmdir:
             mocks["async_lookup_bucket_type"].assert_called_once_with(TEST_HNS_BUCKET)
             expected_request = self._get_delete_folder_request(parent_dir)
             mocks["control_client"].delete_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             mocks["super_rmdir"].assert_not_called()
 
@@ -1990,7 +1990,7 @@ class TestExtendedGcsFileSystemRmdir:
             mocks["async_lookup_bucket_type"].assert_called_once_with(TEST_HNS_BUCKET)
             expected_request = self._get_delete_folder_request(folder_path)
             mocks["control_client"].delete_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
             mocks["super_rmdir"].assert_not_called()
 
@@ -2074,9 +2074,21 @@ class TestExtendedGcsFileSystemRm:
             mock_delete_files.assert_awaited_once_with(mock.ANY, self.BATCH_SIZE)
             assert sorted(mock_delete_files.await_args[0][0]) == files_to_delete
             expected_delete_folder_requests = [
-                mock.call(request=self._get_delete_folder_request(gcsfs, nested_dir2)),
-                mock.call(request=self._get_delete_folder_request(gcsfs, nested_dir1)),
-                mock.call(request=self._get_delete_folder_request(gcsfs, base_dir)),
+                mock.call(
+                    request=self._get_delete_folder_request(gcsfs, nested_dir2),
+                    timeout=mock.ANY,
+                    retry=None,
+                ),
+                mock.call(
+                    request=self._get_delete_folder_request(gcsfs, nested_dir1),
+                    timeout=mock.ANY,
+                    retry=None,
+                ),
+                mock.call(
+                    request=self._get_delete_folder_request(gcsfs, base_dir),
+                    timeout=mock.ANY,
+                    retry=None,
+                ),
             ]
             mocks["control_client"].delete_folder.assert_has_calls(
                 expected_delete_folder_requests
@@ -2140,7 +2152,7 @@ class TestExtendedGcsFileSystemRm:
             mock_delete_files.assert_awaited_once_with([], self.BATCH_SIZE)
             expected_request = self._get_delete_folder_request(gcsfs, dir_path)
             mocks["control_client"].delete_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
 
     def test_rm_non_recursive_on_non_empty_dir_fails(self, gcs_hns, gcs_hns_mocks):
@@ -2170,7 +2182,7 @@ class TestExtendedGcsFileSystemRm:
             )
             expected_request = self._get_delete_folder_request(gcsfs, dir_path)
             mocks["control_client"].delete_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
 
     def test_rm_multiple_paths(self, gcs_hns, gcs_hns_mocks):
@@ -2210,5 +2222,5 @@ class TestExtendedGcsFileSystemRm:
 
             expected_request = self._get_delete_folder_request(gcsfs, dir_path)
             mocks["control_client"].delete_folder.assert_called_once_with(
-                request=expected_request
+                request=expected_request, timeout=mock.ANY, retry=None
             )
