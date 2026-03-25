@@ -294,14 +294,16 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
                 if read_ranges:
                     await mrd.download_ranges(read_ranges)
-                    logger.debug(
-                        "Requested ranges from mrd: %s",
-                        [(r[0], r[1]) for r in read_ranges],
-                    )
-                    logger.debug(
-                        "total bytes requested from mrd: %d",
-                        sum(r[1] for r in read_ranges),
-                    )
+                    if logger.isEnabledFor(logging.DEBUG):
+                        requested_ranges_to_log = [(r[0], r[1]) for r in read_ranges]
+                        logger.debug(
+                            "Requested ranges from mrd: %s",
+                            requested_ranges_to_log,
+                        )
+                        logger.debug(
+                            "total bytes requested from mrd: %d",
+                            sum(r[1] for r in requested_ranges_to_log),
+                        )
 
                 return [b.getvalue() for b in buffers]
             else:
