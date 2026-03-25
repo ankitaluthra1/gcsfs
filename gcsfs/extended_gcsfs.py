@@ -1367,6 +1367,25 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             "Zonal objects do not support rewrite."
         )
 
+    async def _merge(self, path, paths, acl=None):
+        """Concatenate objects within a single bucket.
+
+        For Standard GCS buckets, falls back to the parent class's implementation
+
+        Zonal Bucket Support:
+        Server-side compose is currently NOT supported for Zonal buckets.
+        """
+        bucket, _, _ = self.split_path(path)
+
+        if await self._is_zonal_bucket(bucket):
+            raise NotImplementedError(
+                "Server-side compose/merge is not supported for Zonal buckets."
+            )
+
+        return await super()._merge(path, paths, acl=acl)
+
+    merge = asyn.sync_wrapper(_merge)
+
 
 async def upload_chunk(fs, location, data, offset, size, content_type):
     """

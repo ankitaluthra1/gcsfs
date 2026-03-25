@@ -39,7 +39,8 @@ async def download_range(offset, length, mrd):
     await mrd.download_ranges([(offset, length, buffer)])
     data = buffer.getvalue()
     logger.debug(
-        f"Requested {length} bytes from offset {offset}, downloaded {len(data)} bytes from mrd path: {mrd.bucket_name}/{mrd.object_name}"
+        f"Requested {length} bytes from offset {offset}, downloaded {len(data)} "
+        f"bytes from mrd path: {mrd.bucket_name}/{mrd.object_name}"
     )
     return data
 

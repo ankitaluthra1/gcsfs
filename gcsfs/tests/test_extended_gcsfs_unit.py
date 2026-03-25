@@ -578,3 +578,32 @@ async def test_get_file_exception_cleanup(
 
             # The local file should not exist after the failed download
             assert not lpath.exists()
+
+
+@pytest.mark.asyncio
+async def test_merge_zonal_not_supported(async_gcs, zonal_write_mocks):
+    """Test _merge for Zonal buckets raises NotImplementedError."""
+    path = f"{TEST_ZONAL_BUCKET}/merged_file"
+    paths = [f"{TEST_ZONAL_BUCKET}/file1", f"{TEST_ZONAL_BUCKET}/file2"]
+
+    with pytest.raises(
+        NotImplementedError,
+        match="Server-side compose/merge is not supported for Zonal buckets.",
+    ):
+        await async_gcs._merge(path, paths)
+
+
+@pytest.mark.asyncio
+async def test_merge_delegates_to_core_for_non_zonal(async_gcs):
+    """Test _merge delegates to core._merge when the bucket is not zonal."""
+    path = f"{TEST_BUCKET}/merged_file"
+    paths = [f"{TEST_BUCKET}/file1", f"{TEST_BUCKET}/file2"]
+
+    with (
+        mock.patch.object(async_gcs, "_is_zonal_bucket", return_value=False),
+        mock.patch(
+            "gcsfs.core.GCSFileSystem._merge", new_callable=mock.AsyncMock
+        ) as mock_core_merge,
+    ):
+        await async_gcs._merge(path, paths, acl="public-read")
+        mock_core_merge.assert_awaited_once_with(path, paths, acl="public-read")
