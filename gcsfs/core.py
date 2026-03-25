@@ -1086,29 +1086,26 @@ class GCSFileSystem(asyn.AsyncFileSystem):
         dir_task = asyncio.create_task(
             self._get_directory_info(path, bucket, key, generation)
         )
-        tasks = {exact_task, dir_task}
+        try:
+            tasks = {exact_task, dir_task}
 
-        while tasks:
-            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            while tasks:
+                done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
 
-            for task in done:
-                if task is exact_task:
-                    try:
-                        exact_res = task.result()
-                        if not _is_directory_marker(exact_res):
-                            # It's a file! Return immediately and cancel dir
-                            dir_task.cancel()
-                            return exact_res
-                    except FileNotFoundError:
-                        pass
-                    except Exception as e:
-                        dir_task.cancel()
-                        raise e
-                tasks.remove(task)
+                for task in done:
+                    if task is exact_task:
+                        try:
+                            exact_res = task.result()
+                            if not _is_directory_marker(exact_res):
+                                return exact_res
+                        except FileNotFoundError:
+                            pass
+                    tasks.remove(task)
 
-        # Both tasks finished. exact was either a directory marker or FileNotFoundError.
-        # Fallback to dir_task result (success or raise Exception).
-        return dir_task.result()
+            return dir_task.result()
+        finally:
+            dir_task.cancel()
+            exact_task.cancel()
 
     async def _get_directory_info(self, path, bucket, key, generation):
         """
