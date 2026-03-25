@@ -10,7 +10,6 @@ import mimetypes
 import os
 import posixpath
 import re
-import time
 import uuid
 import warnings
 import weakref
@@ -1082,39 +1081,38 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                 "type": "directory",
             }
 
-        # Check both exact file path and directory info in parellel to distinguish file, directory, or not found
-        async def measured_get_object():
-            t0 = time.perf_counter()
-            res = await self._get_object(path)
-            dt = time.perf_counter() - t0
-            logger.info(f"Latency _get_object({path}): {dt*1000:.2f} ms")
-            return res
-
-        async def measured_get_directory_info():
-            t0 = time.perf_counter()
-            res = await self._get_directory_info(path, bucket, key, generation)
-            dt = time.perf_counter() - t0
-            logger.info(f"Latency _get_directory_info({path}): {dt*1000:.2f} ms")
-            return res
-
-        results = await asyncio.gather(
-            measured_get_object(),
-            measured_get_directory_info(),
-            return_exceptions=True,
+        # Check both exact file path and directory info in parallel to distinguish file, directory, or not found
+        exact_task = asyncio.create_task(self._get_object(path))
+        dir_task = asyncio.create_task(
+            self._get_directory_info(path, bucket, key, generation)
         )
-        exact, dir_info = results
+        tasks = {exact_task: "exact", dir_task: "dir"}
 
-        if not isinstance(exact, Exception):
-            # this condition finds a "placeholder" - still need to check if it's a directory
-            if not _is_directory_marker(exact):
-                return exact
-        elif not isinstance(exact, FileNotFoundError):
-            raise exact
+        while tasks:
+            done, pending = await asyncio.wait(
+                list(tasks.keys()), return_when=asyncio.FIRST_COMPLETED
+            )
 
-        if not isinstance(dir_info, Exception):
-            return dir_info
+            if exact_task in done:
+                tasks.pop(exact_task)
+                try:
+                    exact_res = exact_task.result()
+                    if not _is_directory_marker(exact_res):
+                        # It's a file! Return immediately and cancel dir
+                        dir_task.cancel()
+                        return exact_res
+                except FileNotFoundError:
+                    pass
+                except Exception as e:
+                    dir_task.cancel()
+                    raise e
 
-        raise dir_info
+            if dir_task in done:
+                tasks.pop(dir_task)
+
+        # Both tasks finished. exact was either a directory marker or FileNotFoundError.
+        # Fallback to dir_task result (success or raise Exception).
+        return dir_task.result()
 
     async def _get_directory_info(self, path, bucket, key, generation):
         """
