@@ -2427,3 +2427,32 @@ async def test_info_parallel(gcs):
         assert mock_get_object.call_count == 1
         assert mock_get_dir.call_count == 1
 
+
+
+        # Case 4: _get_object raises generic exception. Should raise immediately.
+        mock_get_object.reset_mock()
+        mock_get_dir.reset_mock()
+        mock_get_object.side_effect = Exception("Generic error")
+        mock_get_dir.side_effect = FileNotFoundError
+
+        with pytest.raises(Exception, match="Generic error"):
+            await gcs._info(path)
+
+        # Case 5: _get_object fails with FileNotFoundError, _get_directory_info raises generic exception.
+        mock_get_object.reset_mock()
+        mock_get_dir.reset_mock()
+        mock_get_object.side_effect = FileNotFoundError
+        mock_get_dir.side_effect = Exception("Directory error")
+
+        with pytest.raises(Exception, match="Directory error"):
+            await gcs._info(path)
+
+        # Case 6: Both fail with FileNotFoundError. Should raise FileNotFoundError.
+        mock_get_object.reset_mock()
+        mock_get_dir.reset_mock()
+        mock_get_object.side_effect = FileNotFoundError
+        mock_get_dir.side_effect = FileNotFoundError
+
+        with pytest.raises(FileNotFoundError):
+            await gcs._info(path)
+
