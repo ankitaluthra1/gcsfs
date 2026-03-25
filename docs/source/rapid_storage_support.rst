@@ -75,7 +75,7 @@ The table below highlights how core filesystem and file-level operations change 
      - Returns a ``ZonalFile`` instance. The gRPC streams are initialized lazily upon the first read or write operation.
    * - **cat_file / _fetch_range**
      - Uses standard HTTP GET range requests.
-     - Uses gRPC `AsyncMultiRangeDownloader (MRD) <https://github.com/googleapis/python-storage/blob/8b7fbde10c80337c4b4a2f6c8a860e28371a770b/google/cloud/storage/asyncio/async_multi_range_downloader.py#L92>`_ (MRD) for parallel byte-range fetching.
+     - Uses gRPC `AsyncMultiRangeDownloader (MRD) <https://github.com/googleapis/python-storage/blob/8b7fbde10c80337c4b4a2f6c8a860e28371a770b/google/cloud/storage/asyncio/async_multi_range_downloader.py#L92>`_ for parallel byte-range fetching.
    * - **get_file**
      - Downloads using standard HTTP GET requests.
      - Downloads via gRPC MRD in configurable chunks.
