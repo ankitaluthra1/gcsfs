@@ -1326,7 +1326,9 @@ class TestExtendedGcsFileSystemInternal:
         # Mock get_storage_layout to fail once then succeed.
         mock_client.get_storage_layout.side_effect = [
             api_exceptions.ServiceUnavailable("Simulated transient error"),
-            mock.AsyncMock(location_type="zone", hierarchical_namespace=mock.Mock(enabled=True)),
+            mock.AsyncMock(
+                location_type="zone", hierarchical_namespace=mock.Mock(enabled=True)
+            ),
         ]
 
         with mock.patch("gcsfs.retry.asyncio.sleep", new_callable=mock.AsyncMock):
