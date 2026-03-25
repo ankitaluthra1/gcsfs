@@ -1317,6 +1317,26 @@ class TestExtendedGcsFileSystemInternal:
             )
 
     @pytest.mark.asyncio
+    async def test_get_bucket_type_retry(self):
+        """Verifies that _get_bucket_type utilizes execute_with_timebound_retry."""
+        fs = ExtendedGcsFileSystem(token="anon")
+        mock_client = mock.AsyncMock()
+        fs._get_control_plane_client = mock.AsyncMock(return_value=mock_client)
+
+        # Mock get_storage_layout to fail once then succeed.
+        mock_client.get_storage_layout.side_effect = [
+            api_exceptions.ServiceUnavailable("Simulated transient error"),
+            mock.AsyncMock(location_type="zone", hierarchical_namespace=mock.Mock(enabled=True)),
+        ]
+
+        with mock.patch("gcsfs.retry.asyncio.sleep", new_callable=mock.AsyncMock):
+            bucket_type = await fs._get_bucket_type("my-bucket")
+
+        # Verify that the method utilized the custom timebound wrapper.
+        assert bucket_type == BucketType.ZONAL_HIERARCHICAL
+        assert mock_client.get_storage_layout.call_count == 2
+
+    @pytest.mark.asyncio
     async def test_get_directory_info_hns_success(self):
         """
         Verifies _get_directory_info uses storage_control_client.get_folder when HNS is enabled.

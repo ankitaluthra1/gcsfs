@@ -131,7 +131,9 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             client = await self._get_control_plane_client()
             bucket_name_value = f"projects/_/buckets/{bucket}/storageLayout"
             logger.debug(f"get_storage_layout request for name: {bucket_name_value}")
-            response = await client.get_storage_layout(name=bucket_name_value)
+            response = await execute_with_timebound_retry(
+                client.get_storage_layout, name=bucket_name_value
+            )
 
             if response.location_type == "zone":
                 return BucketType.ZONAL_HIERARCHICAL
