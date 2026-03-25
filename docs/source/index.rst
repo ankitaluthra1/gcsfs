@@ -238,6 +238,7 @@ Contents
    api
    developer
    hns_buckets
+   retries
    rapid_storage_support
    fuse
    changelog
