@@ -87,7 +87,7 @@ The table below highlights how core filesystem and file-level operations change 
      - **Not supported.** Raises ``NotImplementedError`` as zonal objects do not support rewrites.
    * - **merge (Compose)**
      - Concatenates a list of existing objects into a new object in the same bucket (``compose`` API).
-     - **Not supported.** Raises ``NotImplementedError`` as Rapid objects do not support rewrites or compose operations.
+     - **Not supported.** Fails with an error from the GCS API, as Rapid objects do not support compose operations.
    * - **write / flush**
      - Buffers locally and uploads chunks via HTTP POST when flushed.
      - Buffers data locally. ``flush`` streams the buffered chunks to the AAOW stream for persistence. The default flush interval is 16 MiB (compared to 5 MiB in regional buckets). Note that ``flush`` is more expensive for Rapid buckets as the gRPC stream must update ``persisted_size``.
