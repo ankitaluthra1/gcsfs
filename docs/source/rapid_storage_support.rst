@@ -48,7 +48,7 @@ You can interact with these buckets just like any other filesystem.
 Under the Hood: The ``ExtendedGcsFileSystem`` and ``ZonalFile``
 ---------------------------------------------------------------
 
-`gcsfs` enables Rapid Storage support through the ``ExtendedGcsFileSystem`` and a specialized ``ZonalFile`` file handler. Both ``ExtendedGcsFileSystem`` and ``ZonalFile`` inherits same semantics as existing ``GCSFileSystem`` and ``GCSFile``
+`gcsfs` enables Rapid Storage support through the ``ExtendedGcsFileSystem`` and a specialized ``ZonalFile`` file handler. Both ``ExtendedGcsFileSystem`` and ``ZonalFile`` inherit the same semantics as existing ``GCSFileSystem`` and ``GCSFile``,
 making Rapid Storage support fully backward compatible for all operations.
 
 At initialization, ``ExtendedGcsFileSystem`` evaluates the underlying bucket's storage layout. If it detects Rapid storage, file-level operations are dynamically routed to the ``ZonalFile`` class instead of the standard ``GCSFile``.
