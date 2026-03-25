@@ -75,13 +75,13 @@ The table below highlights how core filesystem and file-level operations change 
      - Returns a ``ZonalFile`` instance. The gRPC streams are initialized lazily upon the first read or write operation.
    * - **cat_file / _fetch_range**
      - Uses standard HTTP GET range requests.
-     - Uses gRPC `AsyncMultiRangeDownloader (MRD) <https://github.com/googleapis/python-storage/blob/8b7fbde10c80337c4b4a2f6c8a860e28371a770b/google/cloud/storage/asyncio/async_multi_range_downloader.py#L92>`_ for parallel byte-range fetching.
+     - Uses gRPC `AsyncMultiRangeDownloader <https://github.com/googleapis/python-storage/blob/8b7fbde10c80337c4b4a2f6c8a860e28371a770b/google/cloud/storage/asyncio/async_multi_range_downloader.py#L92>`_ (MRD) for parallel byte-range fetching.
    * - **get_file**
      - Downloads using standard HTTP GET requests.
      - Downloads via gRPC MRD in configurable chunks.
    * - **put_file / pipe_file**
      - Uses HTTP multipart or resumable uploads.
-     - Uses Bidirectional RPC (`AsyncAppendableObjectWriter (AAOW) <https://github.com/googleapis/python-storage/blob/8b7fbde10c80337c4b4a2f6c8a860e28371a770b/google/cloud/storage/asyncio/async_appendable_object_writer.py#L102>`_) for direct, high-performance writes. Upload parameters like ``contentType``, ``metadata``, ``fixed_key_metadata``, and ``kmsKeyName`` are not supported during uploads.
+     - Uses Bidirectional RPC (`AsyncAppendableObjectWriter or AAOW <https://github.com/googleapis/python-storage/blob/8b7fbde10c80337c4b4a2f6c8a860e28371a770b/google/cloud/storage/asyncio/async_appendable_object_writer.py#L102>`_) for direct, high-performance writes. Upload parameters like ``contentType``, ``metadata``, ``fixed_key_metadata``, and ``kmsKeyName`` are not supported during uploads.
    * - **cp_file (Copy)**
      - Server-side rewrite (``rewriteTo`` API).
      - **Not supported.** Raises ``NotImplementedError`` as zonal objects do not support rewrites.
