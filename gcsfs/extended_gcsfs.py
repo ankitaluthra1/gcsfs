@@ -21,6 +21,7 @@ from google.cloud.storage.asyncio.async_grpc_client import AsyncGrpcClient
 from gcsfs import __version__ as version
 from gcsfs import zb_hns_utils
 from gcsfs.core import GCSFile, GCSFileSystem
+from gcsfs.retry import execute_with_timebound_retry
 from gcsfs.zonal_file import ZonalFile
 
 logger = logging.getLogger("gcsfs")
@@ -509,7 +510,9 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
                 logger.debug(f"rename_folder request: {request}")
                 client = await self._get_control_plane_client()
-                operation = await client.rename_folder(request=request)
+                operation = await execute_with_timebound_retry(
+                    client.rename_folder, request=request
+                )
                 await operation.result()
                 self._update_dircache_after_rename(path1, path2)
 
@@ -622,7 +625,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         try:
             logger.debug(f"create_folder request: {request}")
             client = await self._get_control_plane_client()
-            await client.create_folder(request=request)
+            await execute_with_timebound_retry(client.create_folder, request=request)
             # Instead of invalidating the parent cache, update it to add the new entry.
             parent_path = self._parent(path)
             if parent_path in self.dircache:
@@ -668,7 +671,9 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
                 # Verify existence using get_folder API
                 client = await self._get_control_plane_client()
-                response = await client.get_folder(request=request)
+                response = await execute_with_timebound_retry(
+                    client.get_folder, request=request
+                )
 
                 # If successful, return directory metadata
                 return {
@@ -741,7 +746,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
             logger.debug(f"delete_folder request: {request}")
             client = await self._get_control_plane_client()
-            await client.delete_folder(request=request)
+            await execute_with_timebound_retry(client.delete_folder, request=request)
 
             # Remove the directory from the cache and from its parent's listing.
             self.dircache.pop(path, None)

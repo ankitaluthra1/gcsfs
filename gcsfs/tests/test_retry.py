@@ -1,3 +1,4 @@
+import asyncio
 import multiprocessing
 import os
 import pickle
@@ -5,9 +6,15 @@ from concurrent.futures import ProcessPoolExecutor
 
 import pytest
 import requests
+from google.api_core import exceptions as api_exceptions
 from requests.exceptions import ProxyError
 
-from gcsfs.retry import HttpError, is_retriable, validate_response
+from gcsfs.retry import (
+    HttpError,
+    execute_with_timebound_retry,
+    is_retriable,
+    validate_response,
+)
 from gcsfs.tests.settings import TEST_BUCKET
 from gcsfs.tests.utils import tmpfile
 
@@ -167,3 +174,87 @@ def test_metadata_read_permissions(
         with pytest.raises(expected_error):
             gcs.info(TEST_BUCKET + file_path)
         assert gcs.exists(TEST_BUCKET + file_path) is False
+
+
+@pytest.mark.asyncio
+async def test_execute_with_timebound_retry():
+    calls = 0
+
+    async def mock_call(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise api_exceptions.ServiceUnavailable("mock transient error")
+        return "success"
+
+    result = await execute_with_timebound_retry(mock_call, retry_deadline=1.0)
+    assert result == "success"
+    assert calls == 3
+
+
+@pytest.mark.asyncio
+async def test_execute_with_timebound_retry_timeout():
+    calls = 0
+
+    async def mock_call(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(2.0)
+        return "success"
+
+    # With retry_deadline=0.1 and max_retries=2, it should timeout and finish quickly
+    with pytest.raises(asyncio.TimeoutError):
+        await execute_with_timebound_retry(mock_call, max_retries=2, retry_deadline=0.1)
+
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_with_timebound_retry_maintains_idempotency():
+    calls = 0
+    seen_request_ids = []
+
+    async def mock_call(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+
+        # Capture the request_id from the request object passed via kwargs
+        req = kwargs.get("request")
+        if req and hasattr(req, "request_id"):
+            seen_request_ids.append(req.request_id)
+
+        if calls < 3:
+            raise api_exceptions.ServiceUnavailable("mock transient error")
+        return "success"
+
+    # Create a dummy request object mimicking a storage control request
+    class DummyRequest:
+        def __init__(self, request_id):
+            self.request_id = request_id
+
+    dummy_req = DummyRequest(request_id="unique-id-12345")
+
+    result = await execute_with_timebound_retry(
+        mock_call, request=dummy_req, retry_deadline=1.0
+    )
+
+    assert result == "success"
+    assert calls == 3
+    # Verify that the exact same request_id was received on every single retry attempt
+    assert seen_request_ids == ["unique-id-12345", "unique-id-12345", "unique-id-12345"]
+
+
+@pytest.mark.asyncio
+async def test_execute_with_timebound_retry_max_retries():
+    calls = 0
+
+    async def mock_call(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise api_exceptions.ServiceUnavailable("mock transient error")
+
+    # With max_retries=2, it should fail on the 2nd attempt
+    with pytest.raises(api_exceptions.ServiceUnavailable):
+        await execute_with_timebound_retry(mock_call, max_retries=2, retry_deadline=0.1)
+
+    assert calls == 2  # Initial + 1 retry (total 2 attempts)

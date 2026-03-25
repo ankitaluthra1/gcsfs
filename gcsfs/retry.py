@@ -7,6 +7,7 @@ import aiohttp.client_exceptions
 import google.auth.exceptions
 import requests.exceptions
 from decorator import decorator
+from google.api_core import exceptions as api_exceptions
 
 logger = logging.getLogger("gcsfs")
 
@@ -176,3 +177,61 @@ async def retry_request(func, retries=6, *args, **kwargs):
                 continue
             logger.exception(f"{func.__name__} non-retriable exception: {e}")
             raise e
+
+
+async def execute_with_timebound_retry(
+    func, *args, retry_deadline=30.0, max_retries=6, **kwargs
+):
+    """
+    Executes a gRPC storage control API call with a strict per-attempt timeout and an overall
+    maximum number of retries. Transient errors and timeouts will trigger an exponential backoff loop.
+    """
+    attempt = 0
+    while True:
+        try:
+            # We enforce a per-call timeout by passing `timeout=retry_deadline` to the API call.
+            # asyncio.wait_for serves as a hard local fallback to cancel the task if the gRPC timeout fails to abort.
+            return await asyncio.wait_for(
+                func(*args, timeout=retry_deadline, retry=None, **kwargs),
+                timeout=retry_deadline + 1.0,
+            )
+        except Exception as e:
+            # Determine if the exception is transient and should be retried.
+            is_transient = isinstance(
+                e,
+                (
+                    api_exceptions.RetryError,
+                    api_exceptions.DeadlineExceeded,
+                    api_exceptions.ServiceUnavailable,
+                    api_exceptions.InternalServerError,
+                    api_exceptions.TooManyRequests,
+                    api_exceptions.ResourceExhausted,
+                    api_exceptions.Unknown,
+                    asyncio.TimeoutError,
+                ),
+            )
+
+            # Workaround: retry on 401s / Unauthenticated during transient token lapses
+            if (
+                not is_transient
+                and isinstance(e, api_exceptions.Unauthenticated)
+                and "Invalid Credentials" in str(e)
+            ):
+                is_transient = True
+
+            if not is_transient:
+                raise e
+
+            attempt += 1
+
+            if max_retries is not None and attempt >= max_retries:
+                logger.exception(
+                    f"{func.__name__} out of max retries ({max_retries}) on exception: {e}"
+                )
+                raise e
+
+            sleep_time = min(random.random() + 2 ** (attempt - 1), 32)
+            logger.debug(
+                f"{func.__name__} retrying (attempt {attempt}) after {sleep_time:.2f}s due to exception: {e}"
+            )
+            await asyncio.sleep(sleep_time)
