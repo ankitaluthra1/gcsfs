@@ -1168,8 +1168,14 @@ class GCSFileSystem(asyn.AsyncFileSystem):
 
     async def _cat_file(self, path, start=None, end=None, **kwargs):
         """Simple one-shot get of file data"""
+        # if start and end are both provided and valid, but start >= end, return empty bytes
+        # Otherwise, _process_limits would generate an invalid HTTP range (e.g. "bytes=5-4"
+        # for start=5, end=5), causing the server to return the whole file instead of nothing.
+        if start is not None and end is not None and start >= end >= 0:
+            return b""
         u2 = self.url(path)
-        if start or end:
+        # 'if start or end' fails when start=0 or end=0 because 0 is Falsey.
+        if start is not None or end is not None:
             head = {"Range": await self._process_limits(path, start, end)}
         else:
             head = {}
@@ -2014,8 +2020,13 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
         self.acl = acl
         self.consistency = consistency
         self.checker = get_consistency_checker(consistency)
-        supports_append = kwargs.pop("supports_append", False)
-        if "a" in self.mode and not supports_append:
+        # _supports_append is an internal argument not meant to be used directly.
+        # If True, allows opening file in append mode. This is generally not supported
+        # by GCS, but may be supported by subclasses (e.g. ZonalFile). This flag should
+        # be set by subclasses that support append operations. Otherwise, the mode
+        # will be overwritten to "wb" mode with a warning.
+        _supports_append = kwargs.pop("_supports_append", False)
+        if "a" in self.mode and not _supports_append:
             warnings.warn(
                 "Append mode 'a' is not supported in GCS. Using overwrite mode instead."
             )

@@ -101,7 +101,7 @@ class ZonalFile(GCSFile):
             generation,
             kms_key_name,
             # Zonal buckets support append; this prevents GCSFile from forcing 'w' mode
-            supports_append="a" in mode,
+            _supports_append="a" in mode,
             # pass persisted_size here so that Cache is initialized with correct object size
             size=object_size,
             **kwargs,

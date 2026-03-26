@@ -92,38 +92,53 @@ def test_open_uses_correct_blocksize_and_consistency_for_all_bucket_types(
 
 
 @pytest.mark.parametrize(
-    "start,end,exp_offset,exp_length,exp_exc",
+    "start, end, exp_offset, exp_length",
     [
-        (None, None, 0, file_size, None),  # full file
-        (-10, None, file_size - 10, 10, None),  # start negative
-        (10, -10, 10, file_size - 20, None),  # end negative
-        (20, 20, 20, 0, None),  # zero-length slice
-        (50, 40, None, None, ValueError),  # end before start -> raises
-        (-200, None, None, None, ValueError),  # offset negative -> raises
-        (file_size - 10, 200, file_size - 10, 10, None),  # end > size clamps
+        # --- Standard Slicing ---
+        (None, None, 0, file_size),  # Full file: data[:]
+        (10, 20, 10, 10),  # Middle slice: data[10:20]
+        (None, 10, 0, 10),  # Prefix: data[:10]
+        (10, None, 10, file_size - 10),  # Suffix: data[10:]
+        # --- Negative Indices ---
+        (-10, None, file_size - 10, 10),  # Last N bytes: data[-10:]
+        (None, -10, 0, file_size - 10),  # All except last N: data[:-10]
+        (10, -10, 10, file_size - 20),  # Positive start, Negative end: data[10:-10]
+        # --- Zero Length & Empty Reads ---
+        (20, 20, 20, 0),  # Zero-length (Start == End): data[20:20]
+        (50, 40, 50, 0),  # Crossover (Start > End): data[50:40] -> Empty
         (
             file_size + 10,
-            file_size + 20,
+            None,
             file_size + 10,
             0,
+        ),  # Start past EOF: data[110:] -> Empty
+        # --- Overshoot & Clamping ---
+        (
+            -file_size * 2,
             None,
-        ),  # offset > size -> empty
+            0,
+            file_size,
+        ),  # Start Overshoot: data[-200:] -> Whole file
+        (
+            file_size - 10,
+            file_size + 100,
+            file_size - 10,
+            10,
+        ),  # End Overshoot: data[90:200] -> Last 10 bytes
     ],
 )
 def test_process_limits_parametrized(
-    extended_gcsfs, start, end, exp_offset, exp_length, exp_exc
+    extended_gcsfs, start, end, exp_offset, exp_length
 ):
-    if exp_exc is not None:
-        with pytest.raises(exp_exc):
-            extended_gcsfs.sync_process_limits_to_offset_and_length(
-                file_path, start, end
-            )
-    else:
-        offset, length = extended_gcsfs.sync_process_limits_to_offset_and_length(
-            file_path, start, end
-        )
-        assert offset == exp_offset
-        assert length == exp_length
+    """
+    Verifies that start/end limits are correctly converted to offset/length
+    """
+    offset, length = extended_gcsfs.sync_process_limits_to_offset_and_length(
+        file_path, start, end
+    )
+
+    assert offset == exp_offset
+    assert length == exp_length
 
 
 def test_process_limits_when_file_size_passed(extended_gcsfs):
@@ -578,3 +593,32 @@ async def test_get_file_exception_cleanup(
 
             # The local file should not exist after the failed download
             assert not lpath.exists()
+
+
+@pytest.mark.asyncio
+async def test_merge_zonal_not_supported(async_gcs, zonal_write_mocks):
+    """Test _merge for Zonal buckets raises NotImplementedError."""
+    path = f"{TEST_ZONAL_BUCKET}/merged_file"
+    paths = [f"{TEST_ZONAL_BUCKET}/file1", f"{TEST_ZONAL_BUCKET}/file2"]
+
+    with pytest.raises(
+        NotImplementedError,
+        match="Server-side compose/merge is not supported for Zonal buckets.",
+    ):
+        await async_gcs._merge(path, paths)
+
+
+@pytest.mark.asyncio
+async def test_merge_delegates_to_core_for_non_zonal(async_gcs):
+    """Test _merge delegates to core._merge when the bucket is not zonal."""
+    path = f"{TEST_BUCKET}/merged_file"
+    paths = [f"{TEST_BUCKET}/file1", f"{TEST_BUCKET}/file2"]
+
+    with (
+        mock.patch.object(async_gcs, "_is_zonal_bucket", return_value=False),
+        mock.patch(
+            "gcsfs.core.GCSFileSystem._merge", new_callable=mock.AsyncMock
+        ) as mock_core_merge,
+    ):
+        await async_gcs._merge(path, paths, acl="public-read")
+        mock_core_merge.assert_awaited_once_with(path, paths, acl="public-read")

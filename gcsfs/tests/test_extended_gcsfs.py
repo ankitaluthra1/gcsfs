@@ -99,6 +99,8 @@ def gcs_bucket_mocks():
             side_effect=download_side_effect
         )
         mock_downloader.persisted_size = None
+        mock_downloader.bucket_name = "mock_bucket"
+        mock_downloader.object_name = "mock_object"
 
         mock_create_mrd = mock.AsyncMock(return_value=mock_downloader)
         with (
@@ -992,6 +994,8 @@ async def create_mrd_side_effect(client, bucket, object_name, generation):
     downloader.download_ranges = mock.AsyncMock(side_effect=download_side_effect)
     downloader.persisted_size = len(file_data)
     downloader.close = mock.AsyncMock()
+    downloader.bucket_name = "bucket"
+    downloader.object_name = object_name
     return downloader
 
 

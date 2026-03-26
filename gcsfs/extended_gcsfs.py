@@ -4,7 +4,6 @@ import os
 import uuid
 from enum import Enum
 from glob import has_magic
-from io import BytesIO
 
 from fsspec import asyn
 from fsspec.callbacks import NoOpCallback
@@ -201,9 +200,6 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
         Returns:
             tuple: A tuple containing (offset, length).
-
-        Raises:
-            ValueError: If the calculated range is invalid.
         """
         size = file_size
 
@@ -211,7 +207,8 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             offset = 0
         elif start < 0:
             size = (await self._info(path))["size"] if size is None else size
-            offset = size + start
+            # If start is negative and larger than the file size, we should start from 0.
+            offset = max(0, size + start)
         else:
             offset = start
 
@@ -224,14 +221,9 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         else:
             effective_end = end
 
-        if offset < 0:
-            raise ValueError(f"Calculated start offset ({offset}) cannot be negative.")
-        if effective_end < offset:
-            raise ValueError(
-                f"Calculated end position ({effective_end}) cannot be before start offset ({offset})."
-            )
-        elif effective_end == offset:
-            length = 0  # Handle zero-length slice
+        # If the requested end is before/ same as the start, return empty.
+        if effective_end <= offset:
+            return offset, 0
         else:
             length = effective_end - offset  # Normal case
             size = (await self._info(path))["size"] if size is None else size
@@ -279,7 +271,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             file_size = size or mrd.persisted_size
             if file_size is None:
                 logger.warning(
-                    "AsyncMultiRangeDownloader (MRD) has no 'persisted_size'. "
+                    f"AsyncMultiRangeDownloader (MRD) for {path} has no 'persisted_size'. "
                     "Falling back to _info() to get the file size."
                 )
                 file_size = (await self._info(path))["size"]
@@ -294,22 +286,13 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 ):
                     raise RuntimeError("Request not satisfiable.")
 
-                buffers = []  # To hold the results in order
                 read_ranges = []  # To pass to MRD
 
                 for length in chunk_lengths:
-                    buf = BytesIO()
-                    buffers.append(buf)
-
-                    if length > 0:
-                        read_ranges.append((current_offset, length, buf))
-
+                    read_ranges.append((current_offset, length))
                     current_offset += length
 
-                if read_ranges:
-                    await mrd.download_ranges(read_ranges)
-
-                return [b.getvalue() for b in buffers]
+                return await zb_hns_utils.download_ranges(read_ranges, mrd)
             else:
                 end = kwargs.get("end")
                 offset, length = await self._process_limits_to_offset_and_length(
@@ -359,7 +342,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             file_size = mrd.persisted_size
             if file_size is None:
                 logger.warning(
-                    "AsyncMultiRangeDownloader (MRD) exists but has no 'persisted_size'. "
+                    f"AsyncMultiRangeDownloader (MRD) for {path} has no 'persisted_size'. "
                     "Falling back to _info() to get the file size. "
                     "This may result in incorrect behavior for unfinalized objects."
                 )
@@ -1330,7 +1313,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             size = mrd.persisted_size
             if size is None:
                 logger.warning(
-                    "AsyncMultiRangeDownloader (MRD) has no 'persisted_size'. "
+                    f"AsyncMultiRangeDownloader (MRD) for {rpath} has no 'persisted_size'. "
                     "Falling back to _info() to get the file size. "
                     "This may result in incorrect behavior for unfinalized objects."
                 )
@@ -1424,6 +1407,25 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             "Server-side copy involving Zonal buckets is not supported. "
             "Zonal objects do not support rewrite."
         )
+
+    async def _merge(self, path, paths, acl=None):
+        """Concatenate objects within a single bucket.
+
+        For Standard GCS buckets, falls back to the parent class's implementation
+
+        Zonal Bucket Support:
+        Server-side compose is currently NOT supported for Zonal buckets.
+        """
+        bucket, _, _ = self.split_path(path)
+
+        if await self._is_zonal_bucket(bucket):
+            raise NotImplementedError(
+                "Server-side compose/merge is not supported for Zonal buckets."
+            )
+
+        return await super()._merge(path, paths, acl=acl)
+
+    merge = asyn.sync_wrapper(_merge)
 
 
 async def upload_chunk(fs, location, data, offset, size, content_type):
