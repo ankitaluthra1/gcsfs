@@ -63,9 +63,7 @@ async def download_ranges(ranges, mrd):
     # ranges by returning b"" without calling MRD. So only create tasks for length > 0
 
     if len(ranges) > MRD_MAX_RANGES:
-        raise ValueError(
-            "Invalid input - length of read_ranges cannot be more than 1000"
-        )
+        raise ValueError("Invalid input - number of ranges cannot be more than 1000")
 
     tasks = [
         (i, off, length, BytesIO())

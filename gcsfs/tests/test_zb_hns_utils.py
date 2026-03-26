@@ -253,6 +253,6 @@ async def test_download_ranges_validation_limit():
 
     with pytest.raises(
         ValueError,
-        match="Invalid input - length of read_ranges cannot be more than 1000",
+        match="Invalid input - number of ranges cannot be more than 1000",
     ):
         await zb_hns_utils.download_ranges(ranges, mock_mrd)
