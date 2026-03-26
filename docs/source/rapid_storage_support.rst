@@ -1,8 +1,8 @@
 =============================
-Rapid Storage (Zonal Buckets)
+Rapid Storage (Rapid Buckets)
 =============================
 
-To accelerate data-intensive workloads such as AI/ML training, model checkpointing, and analytics, Google Cloud Storage (GCS) offers **Rapid Storage** through **Zonal Buckets**.
+To accelerate data-intensive workloads such as AI/ML training, model checkpointing, and analytics, Google Cloud Storage (GCS) offers **Rapid Storage** through **Rapid Buckets**.
 
 ``gcsfs`` provides full support for accessing, reading, and writing to Rapid Storage buckets.
 
@@ -23,9 +23,9 @@ You can find detailed documentation on zonal bucket here: https://docs.cloud.goo
 
 Using Rapid Storage with ``gcsfs``
 ----------------------------------
-Rapid Storage is fully supported by gcsfs without any code changes needed .To interact with Rapid Storage,
+Rapid Storage is fully supported by gcsfs without any code changes needed. To interact with Rapid Storage,
 the underlying filesystem operations will automatically route through
-the newly added ``ExtendedFileSystem`` designed to support multiple storage types like HNS and Rapid.
+the newly added ``ExtendedGcsFileSystem`` designed to support multiple storage types like HNS and Rapid.
 You can interact with these buckets just like any other filesystem.
 
 **Code Example**
@@ -45,20 +45,20 @@ You can interact with these buckets just like any other filesystem.
     with fs.open('my-zonal-rapid-bucket/data/checkpoint.pt', 'ab') as f:
         f.write(b"appended data...")
 
-Under the Hood: The ``ExtendedFileSystem`` and ``ZonalFile``
-------------------------------------------------------------
+Under the Hood: The ``ExtendedGcsFileSystem`` and ``ZonalFile``
+---------------------------------------------------------------
 
-`gcsfs` enables Rapid Storage support through the ``ExtendedFileSystem`` and a specialized ``ZonalFile`` file handler. Both ``ExtendedFileSystem`` and ``ZonalFile`` inherits same semantics as existing ``GCSFileSystem`` and ``GCSFile``
-making Rapid support fully backward compatible for all operations.
+`gcsfs` enables Rapid Storage support through the ``ExtendedGcsFileSystem`` and a specialized ``ZonalFile`` file handler. Both ``ExtendedGcsFileSystem`` and ``ZonalFile`` inherit the same semantics as existing ``GCSFileSystem`` and ``GCSFile``,
+making Rapid Storage support fully backward compatible for all operations.
 
-At initialization, ``ExtendedFileSystem`` evaluates the underlying bucket's storage layout. If it detects Rapid storage, file-level operations are dynamically routed to the ``ZonalFile`` class instead of the standard ``GCSFile``.
+At initialization, ``ExtendedGcsFileSystem`` evaluates the underlying bucket's storage layout. If it detects Rapid storage, file-level operations are dynamically routed to the ``ZonalFile`` class instead of the standard ``GCSFile``.
 
 Unlike standard operations which use HTTP endpoints, ``ZonalFile`` utilizes the Google Cloud Storage gRPC API—specifically the ``AsyncMultiRangeDownloader`` (MRD) for reads and ``AsyncAppendableObjectWriter`` (AAOW) for writes.
 
 Operation Semantics: Standard vs. Rapid Storage
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The table below highlights how core filesystem and file-level operations change when interacting with a Rapid Zonal bucket compared to a standard GCS bucket.
+The table below highlights how core filesystem and file-level operations change when interacting with a Rapid bucket compared to a standard GCS bucket.
 
 .. list-table::
    :widths: 15 40 45
@@ -66,14 +66,14 @@ The table below highlights how core filesystem and file-level operations change 
 
    * - Class / Method
      - Standard Storage (``GCSFileSystem`` / ``GCSFile``)
-     - Rapid Storage (``ExtendedFileSystem`` / ``ZonalFile``)
+     - Rapid Storage (``ExtendedGcsFileSystem`` / ``ZonalFile``)
    * - **open(mode='a')**
      - **Not supported.** Overwritten to ``w`` mode with a warning.
      - **Supported.** Natively opens an append stream to the object via gRPC.
-   * - **ExtendedFileSystem._open**
+   * - **ExtendedGcsFileSystem._open**
      - Returns a standard ``GCSFile`` instance.
-     - Returns a ``ZonalFile`` instance, initializing gRPC streams.
-   * - **cat_file`` / ``_fetch_range**
+     - Returns a ``ZonalFile`` instance. The gRPC streams are initialized lazily upon the first read or write operation.
+   * - **cat_file / _fetch_range**
      - Uses standard HTTP GET range requests.
      - Uses gRPC `AsyncMultiRangeDownloader <https://github.com/googleapis/python-storage/blob/8b7fbde10c80337c4b4a2f6c8a860e28371a770b/google/cloud/storage/asyncio/async_multi_range_downloader.py#L92>`_ (MRD) for parallel byte-range fetching.
    * - **get_file**
@@ -81,19 +81,22 @@ The table below highlights how core filesystem and file-level operations change 
      - Downloads via gRPC MRD in configurable chunks.
    * - **put_file / pipe_file**
      - Uses HTTP multipart or resumable uploads.
-     - Uses Bidirectional RPC (`AsyncAppendableObjectWriter <https://github.com/googleapis/python-storage/blob/8b7fbde10c80337c4b4a2f6c8a860e28371a770b/google/cloud/storage/asyncio/async_appendable_object_writer.py#L102>`_) for direct, high-performance writes.
+     - Uses Bidirectional RPC (`AsyncAppendableObjectWriter or AAOW <https://github.com/googleapis/python-storage/blob/8b7fbde10c80337c4b4a2f6c8a860e28371a770b/google/cloud/storage/asyncio/async_appendable_object_writer.py#L102>`_) for direct, high-performance writes. Upload parameters like ``contentType``, ``metadata``, ``fixed_key_metadata``, and ``kmsKeyName`` are not supported during uploads.
    * - **cp_file (Copy)**
      - Server-side rewrite (``rewriteTo`` API).
      - **Not supported.** Raises ``NotImplementedError`` as zonal objects do not support rewrites.
+   * - **merge (Compose)**
+     - Concatenates a list of existing objects into a new object in the same bucket (``compose`` API).
+     - **Not supported.** Fails with an error from the GCS API, as Rapid objects do not support compose operations.
    * - **write / flush**
      - Buffers locally and uploads chunks via HTTP POST when flushed.
-     - Streams chunks directly to the AAOW stream for immediate persistence.
+     - Buffers data locally. ``flush`` streams the buffered chunks to the AAOW stream for persistence. The default flush interval is 16 MiB (compared to 5 MiB in regional buckets). Note that ``flush`` is more expensive for Rapid buckets as the gRPC stream must update ``persisted_size``.
    * - **discard**
      - Cancels an in-progress HTTP multi-upload and cleans up.
      - **Not applicable.** Logs a warning since streaming data cannot be canceled.
    * - **close**
      - Finalizes the file upload to GCS.
-     - Closes streams but leaves the object unfinalized (appendable) by default, unless ``finalize_on_close=True`` or `.commit()` is done.
+     - Closes streams but leaves the object unfinalized (appendable) by default. Use ``finalize_on_close=True`` when opening file or calling ``close()`` or use ``.commit()`` to finalize. Note that ``autocommit`` does not work for Rapid buckets.
    * - **mv**
      - Object-level copy-and-delete logic.
      - Uses native, atomic ``rename_folder`` API for folders. All directory semantics described in the :doc:`HNS documentation <hns_buckets>` also apply For Rapid.
@@ -104,7 +107,7 @@ Performance Benchmarks
 Rapid Storage via gRPC significantly improves read and write performance compared to standard HTTP regional buckets.
 Here are the microbenchmarks
 Rapid drastically outperform standard buckets across different read patterns, including both sequential and random reads, as well as for writes.
-To reproduce using more combinations, please see `gcsfs/perf/microbenchmarks`
+To reproduce using more combinations, please see the `gcsfs/perf/microbenchmarks <https://github.com/fsspec/gcsfs/tree/main/gcsfs/tests/perf/microbenchmarks>`_ directory.
 
 .. list-table:: **Sequential Reads**
    :header-rows: 1
@@ -210,8 +213,11 @@ When working with Rapid Storage in ``gcsfs``, keep the following GCS limitations
 1. **HNS Requirement:** You cannot use Rapid Storage without a Hierarchical Namespace. All directory semantics described in the :doc:`HNS documentation <hns_buckets>` apply here (e.g., real folder resources, strict ``mkdir`` behavior).
 2. **Append Semantics:** In a standard flat GCS bucket, appending to a file is typically a costly operation requiring a full object download and rewrite. Rapid Storage supports **native appends**. When you open a file in append mode (``ab``), ``gcsfs`` natively appends to the object and the object's size grows in real-time.
 3. **Single Writer:** Appendable objects can only have one active writer at a time. If a new write stream is established for an object, the original stream is interrupted and will return an error from Cloud Storage.
-4. **Finalization:** Once an object is finalized (e.g., the write stream is closed), you can no longer append to it. To take advantage of `native appends`, gcsfs keeps the object unfinalized by default.
-5. **Incompatibilities:** Zonal buckets currently do not support certain standard GCS features, full list is here: https://docs.cloud.google.com/storage/docs/rapid/rapid-bucket#incompatibilities
+4. **Finalization and Autocommit:** Once an object is finalized (e.g., the write stream is closed), you can no longer append to it. To take advantage of **native appends**, gcsfs keeps the object unfinalized by default. The ``autocommit`` argument will not work for Rapid buckets. If you want to finalize the object upon closing, you must specify ``finalize_on_close=True`` when opening the file.
+5. **Metadata and Object Size:** When fetching metadata, the object size might be stale for objects that are unfinalized and still being appended to. Additionally, setting ``contentType``, ``metadata``, ``fixed_key_metadata``, and ``kmsKeyName`` is not supported during upload to Rapid buckets.
+6. **Transactions:** ``transaction`` feature is not supported in Rapid buckets since it relies on ``discard()`` method which is not supported for Rapid buckets.
+7. **Write Buffering:** The flush interval is 16 MiB for writes in Rapid buckets, compared to 5 MiB in regional buckets. Calling ``flush`` is also more expensive in Rapid buckets because the gRPC stream must update the ``persisted_size``.
+8. **Incompatibilities:** Rapid buckets currently do not support certain standard GCS features, full list is here: https://docs.cloud.google.com/storage/docs/rapid/rapid-bucket#incompatibilities
 
 
 For more details on managing, pricing, and optimizing these buckets, refer to the official documentation for `Rapid Bucket <https://cloud.google.com/storage/docs/rapid/rapid-bucket>`_.
