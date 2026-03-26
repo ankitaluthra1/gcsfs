@@ -127,5 +127,6 @@ def test_write_multi_process(
         worker_target=_process_worker_fixed_duration,
         args_builder=args_builder,
         benchmark_group=BENCHMARK_GROUP,
+        gcs_kwargs={"block_size": params.block_size_bytes},
         request=request,
     )

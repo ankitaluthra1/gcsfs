@@ -107,6 +107,7 @@ def test_write_configurator(mock_config_dependencies):
     common = {
         "bucket_types": ["regional"],
         "chunk_sizes_mb": [10],
+        "block_sizes_mb": [32],
         "rounds": 1,
         "runtime": 30,
     }
@@ -117,9 +118,13 @@ def test_write_configurator(mock_config_dependencies):
 
     assert len(cases) == 1
     case = cases[0]
-    assert case.name == "write_test_2procs_1threads_10MB_chunk_regional_30s_duration"
+    assert (
+        case.name
+        == "write_test_2procs_1threads_10MB_chunk_32MB_block_regional_30s_duration"
+    )
     assert case.file_size_bytes == 0
     assert case.chunk_size_bytes == 10 * MB
+    assert case.block_size_bytes == 32 * MB
     assert case.processes == 2
     assert case.files == 2  # threads * processes
 
