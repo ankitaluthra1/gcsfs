@@ -39,8 +39,16 @@ async def download_range(offset, length, mrd):
     buffer = BytesIO()
     await mrd.download_ranges([(offset, length, buffer)])
     data = buffer.getvalue()
+    bytes_downloaded = len(data)
+
+    if length != bytes_downloaded:
+        logger.warning(
+            f"Short read detected for {mrd.bucket_name}/{mrd.object_name}! "
+            f"Requested {length} bytes but downloaded {bytes_downloaded} bytes."
+        )
+
     logger.debug(
-        f"Requested {length} bytes from offset {offset}, downloaded {len(data)} "
+        f"Requested {length} bytes from offset {offset}, downloaded {bytes_downloaded} "
         f"bytes from mrd path: {mrd.bucket_name}/{mrd.object_name}"
     )
     return data
@@ -83,20 +91,22 @@ async def download_ranges(ranges, mrd):
         results[i] = buffer.getvalue()
 
     # Log stats
+    total_requested = sum(r[1] for r in ranges)
+    total_downloaded = sum(len(r) for r in results)
+
+    if total_requested != total_downloaded:
+        logger.warning(
+            f"Short read detected for {mrd.bucket_name}/{mrd.object_name}! "
+            f"Requested {total_requested} bytes but downloaded {total_downloaded} bytes."
+        )
+
     if logger.isEnabledFor(logging.DEBUG):
         requested_ranges_to_log = [(r[0], r[1]) for r in ranges]
-        total_requested = sum(r[1] for r in requested_ranges_to_log)
-        total_downloaded = sum(len(r) for r in results)
-
         logger.debug(
-            "mrd path: %s/%s | Requested ranges: %s | total bytes requested: %d "
-            "| Downloaded %d ranges: downloaded %d bytes",
-            mrd.bucket_name,
-            mrd.object_name,
-            requested_ranges_to_log,
-            total_requested,
-            len(results),
-            total_downloaded,
+            f"mrd path: {mrd.bucket_name}/{mrd.object_name} | "
+            f"Requested {len(ranges)} ranges: {requested_ranges_to_log} | "
+            f"total bytes requested: {total_requested} | "
+            f"total bytes downloaded: {total_downloaded}"
         )
 
     return results
