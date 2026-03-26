@@ -1999,11 +1999,6 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
             Timeout seconds for the asynchronous callback.
         generation: str
             Object generation.
-        supports_append: bool
-            If True, allows opening file in append mode. This is generally not supported
-            by GCS, but may be supported by subclasses (e.g. ZonalFile). This flag
-            should be set by subclasses that support append operations. Otherwise,
-            the mode will be overwritten to "wb" mode with a warning.
         """
         bucket, key, path_generation = gcsfs.split_path(path)
         if not key:
@@ -2025,8 +2020,13 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
         self.acl = acl
         self.consistency = consistency
         self.checker = get_consistency_checker(consistency)
-        supports_append = kwargs.pop("supports_append", False)
-        if "a" in self.mode and not supports_append:
+        # _supports_append is an internal argument not meant to be used directly.
+        # If True, allows opening file in append mode. This is generally not supported
+        # by GCS, but may be supported by subclasses (e.g. ZonalFile). This flag should
+        # be set by subclasses that support append operations. Otherwise, the mode
+        # will be overwritten to "wb" mode with a warning.
+        _supports_append = kwargs.pop("_supports_append", False)
+        if "a" in self.mode and not _supports_append:
             warnings.warn(
                 "Append mode 'a' is not supported in GCS. Using overwrite mode instead."
             )
