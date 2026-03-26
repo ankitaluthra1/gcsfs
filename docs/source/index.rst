@@ -239,6 +239,7 @@ Contents
    developer
    hns_buckets
    rapid_storage_support
+   retries
    fuse
    changelog
    code-of-conduct
