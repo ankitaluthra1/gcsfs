@@ -287,32 +287,13 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 ):
                     raise RuntimeError("Request not satisfiable.")
 
-                buffers = []  # To hold the results in order
                 read_ranges = []  # To pass to MRD
 
                 for length in chunk_lengths:
-                    buf = BytesIO()
-                    buffers.append(buf)
-
-                    if length > 0:
-                        read_ranges.append((current_offset, length, buf))
-
+                    read_ranges.append((current_offset, length))
                     current_offset += length
 
-                if read_ranges:
-                    await mrd.download_ranges(read_ranges)
-                    if logger.isEnabledFor(logging.DEBUG):
-                        requested_ranges_to_log = [(r[0], r[1]) for r in read_ranges]
-                        logger.debug(
-                            "Requested ranges from mrd: %s",
-                            requested_ranges_to_log,
-                        )
-                        logger.debug(
-                            "total bytes requested from mrd: %d",
-                            sum(r[1] for r in requested_ranges_to_log),
-                        )
-
-                return [b.getvalue() for b in buffers]
+                return await zb_hns_utils.download_ranges(read_ranges, mrd)
             else:
                 end = kwargs.get("end")
                 offset, length = await self._process_limits_to_offset_and_length(
