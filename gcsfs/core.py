@@ -1171,11 +1171,7 @@ class GCSFileSystem(asyn.AsyncFileSystem):
         # if start and end are both provided and valid, but start >= end, return empty bytes
         # Otherwise, _process_limits would generate an invalid HTTP range (e.g. "bytes=5-4"
         # for start=5, end=5), causing the server to return the whole file instead of nothing.
-        if (
-            start is not None
-            and end is not None
-            and start >= end >= 0
-        ):
+        if start is not None and end is not None and start >= end >= 0:
             return b""
         u2 = self.url(path)
         # 'if start or end' fails when start=0 or end=0 because 0 is Falsey.
