@@ -147,8 +147,7 @@ def _benchmark_listing_fixture_helper(
     create_folders=False,
     require_file_paths=False,
 ):
-    gcs_admin = extended_gcs_factory()
-    gcs = gcs_admin
+    gcs = extended_gcs_factory()
 
     prefix = f"{params.bucket_name}/{prefix_tag}-{uuid.uuid4()}"
 
@@ -198,7 +197,7 @@ def _benchmark_listing_fixture_helper(
             f"folders at depth {depth} with prefix '{prefix}'."
         )
         start_time = time.perf_counter()
-        _prepare_folders(gcs_admin, target_dirs)
+        _prepare_folders(gcs, target_dirs)
         duration_ms = (time.perf_counter() - start_time) * 1000
         logging.info(
             f"Benchmark '{params.name}' setup created {len(target_dirs)} folders in {duration_ms:.2f} ms."
@@ -218,7 +217,7 @@ def _benchmark_listing_fixture_helper(
     )
 
     start_time = time.perf_counter()
-    _prepare_files(gcs_admin, file_paths, getattr(params, "file_size_bytes", 0))
+    _prepare_files(gcs, file_paths, getattr(params, "file_size_bytes", 0))
 
     duration_ms = (time.perf_counter() - start_time) * 1000
     logging.info(
@@ -236,7 +235,7 @@ def _benchmark_listing_fixture_helper(
             f"Tearing down benchmark '{params.name}': deleting files and folders."
         )
         try:
-            gcs_admin.rm(f"{prefix}*", recursive=True)
+            gcs.rm(f"{prefix}*", recursive=True)
         except Exception as e:
             logging.error(f"Failed to clean up benchmark files: {e}")
 
