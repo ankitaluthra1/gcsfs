@@ -1048,27 +1048,24 @@ class GCSFileSystem(asyn.AsyncFileSystem):
         """File information about this path."""
         path = self._strip_protocol(path).rstrip("/")
         if "/" not in path:
-            # Parallelize the call and ls
-            res_call, res_ls = await asyncio.gather(
-                self._call("GET", f"b/{path}", json_out=True),
-                self._ls(path, max_results=1),
-                return_exceptions=True,
+            get_task = asyncio.create_task(
+                self._call("GET", f"b/{path}", json_out=True)
             )
-
-            if not isinstance(res_call, Exception):
-                out = res_call
-                out.update(size=0, type="directory")
-                return out
-
-            if isinstance(res_call, OSError):
-                # GET bucket failed, try ls; will have no metadata
-                if isinstance(res_ls, Exception):
-                    raise res_ls
-                if res_ls:
-                    return {"name": path, "size": 0, "type": "directory"}
-                raise FileNotFoundError(path)
-
-            raise res_call
+            ls_task = asyncio.create_task(self._ls(path, max_results=1))
+            try:
+                try:
+                    out = await get_task
+                    out.update(size=0, type="directory")
+                    return out
+                except OSError:
+                    if await ls_task:
+                        return {"name": path, "size": 0, "type": "directory"}
+                    raise FileNotFoundError(path)
+            finally:
+                if not get_task.done():
+                    get_task.cancel()
+                if not ls_task.done():
+                    ls_task.cancel()
 
         # Check directory cache for parent dir
         parent_path = self._parent(path)
