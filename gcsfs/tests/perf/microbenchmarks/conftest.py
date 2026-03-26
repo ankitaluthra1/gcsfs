@@ -150,27 +150,6 @@ def _benchmark_listing_fixture_helper(
     gcs_admin = extended_gcs_factory()
     gcs = gcs_admin
 
-    impersonate_sa = getattr(params, "impersonate_sa", None)
-    if impersonate_sa:
-        logging.info(f"Impersonating service account {impersonate_sa} for benchmark.")
-        try:
-            import subprocess
-
-            token_cmd = [
-                "gcloud",
-                "auth",
-                "print-access-token",
-                f"--impersonate-service-account={impersonate_sa}",
-            ]
-            result = subprocess.run(
-                token_cmd, capture_output=True, text=True, check=True
-            )
-            token = result.stdout.strip()
-            gcs = extended_gcs_factory(token=token)
-        except Exception as e:
-            logging.error(f"Failed to impersonate service account: {e}")
-            raise
-
     prefix = f"{params.bucket_name}/{prefix_tag}-{uuid.uuid4()}"
 
     # Deterministic folder structure generation
