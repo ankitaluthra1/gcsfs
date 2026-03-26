@@ -47,7 +47,6 @@ The benchmarks use a set of parameter classes to define the configuration for ea
 
 *   **Info Parameters**: Specific to Info operations (extends Listing Parameters).
     *    `target_type`: The type of target to query: "bucket", "folder", or "file".
-    *    `impersonate_sa`: (Optional) Service account email to impersonate for the benchmark execution. Used to test scenarios with restricted IAM permissions.
 
 ## Configuration
 

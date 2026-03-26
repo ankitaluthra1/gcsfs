@@ -2094,3 +2094,24 @@ async def test_info_bucket_other_exception(gcs):
 
             mock_call.assert_called_with("GET", f"b/{bucket}", json_out=True)
             mock_ls.assert_awaited_once_with(bucket, max_results=1)
+
+
+@pytest.mark.asyncio
+async def test_info_bucket_fallback_success(gcs):
+    bucket = "test-bucket"
+
+    with mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call:
+        mock_call.side_effect = OSError("Access denied")
+        with mock.patch.object(gcs, "_ls", new_callable=mock.AsyncMock) as mock_ls:
+            mock_ls.return_value = ["test-bucket/some-file"]
+
+            info = await gcs._info(bucket)
+
+            mock_call.assert_called_with("GET", f"b/{bucket}", json_out=True)
+            mock_ls.assert_awaited_once_with(bucket, max_results=1)
+
+            assert info == {
+                "name": bucket,
+                "size": 0,
+                "type": "directory",
+            }
