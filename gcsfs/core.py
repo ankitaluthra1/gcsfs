@@ -1174,9 +1174,7 @@ class GCSFileSystem(asyn.AsyncFileSystem):
         if (
             start is not None
             and end is not None
-            and start >= 0
-            and end >= 0
-            and start >= end
+            and start >= end >= 0
         ):
             return b""
         u2 = self.url(path)
