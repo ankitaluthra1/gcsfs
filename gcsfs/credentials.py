@@ -120,7 +120,10 @@ class GoogleCredentials:
             warnings.warn("Saving token cache failed: " + str(e))
 
     def _connect_google_default(self):
-        credentials, project = gauth.default(scopes=[self.scope])
+        with requests.Session() as session:
+            req = Request(session)
+            credentials, project = gauth.default(scopes=[self.scope], request=req)
+
         msg = textwrap.dedent(
             """\
         User-provided project '{}' does not match the google default project '{}'. Either

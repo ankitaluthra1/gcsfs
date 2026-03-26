@@ -238,6 +238,7 @@ Contents
    api
    developer
    hns_buckets
+   rapid_storage_support
    fuse
    changelog
    code-of-conduct
