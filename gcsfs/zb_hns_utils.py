@@ -9,6 +9,7 @@ from google.cloud.storage.asyncio.async_appendable_object_writer import (
 from google.cloud.storage.asyncio.async_multi_range_downloader import (
     AsyncMultiRangeDownloader,
 )
+
 MRD_MAX_RANGES = 1000  # MRD supports up to 1000 ranges per request
 logger = logging.getLogger("gcsfs")
 
@@ -43,6 +44,7 @@ async def download_range(offset, length, mrd):
         f"bytes from mrd path: {mrd.bucket_name}/{mrd.object_name}"
     )
     return data
+
 
 async def download_ranges(ranges, mrd):
     """
@@ -87,9 +89,10 @@ async def download_ranges(ranges, mrd):
         requested_ranges_to_log = [(r[0], r[1]) for r in ranges]
         total_requested = sum(r[1] for r in requested_ranges_to_log)
         total_downloaded = sum(len(r) for r in results)
-        
+
         logger.debug(
-            "mrd path: %s/%s | Requested ranges: %s | total bytes requested: %d | Downloaded %d ranges: downloaded %d bytes",
+            "mrd path: %s/%s | Requested ranges: %s | total bytes requested: %d "
+            "| Downloaded %d ranges: downloaded %d bytes",
             mrd.bucket_name,
             mrd.object_name,
             requested_ranges_to_log,

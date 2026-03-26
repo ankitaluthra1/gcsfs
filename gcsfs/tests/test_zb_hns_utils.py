@@ -184,6 +184,7 @@ async def test_close_mrd(caplog):
         in caplog.text
     )
 
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "ranges, expected_call_count",
@@ -255,4 +256,3 @@ async def test_download_ranges_validation_limit():
         match="Invalid input - length of read_ranges cannot be more than 1000",
     ):
         await zb_hns_utils.download_ranges(ranges, mock_mrd)
-

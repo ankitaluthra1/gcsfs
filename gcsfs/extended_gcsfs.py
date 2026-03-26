@@ -4,7 +4,6 @@ import os
 import uuid
 from enum import Enum
 from glob import has_magic
-from io import BytesIO
 
 from fsspec import asyn
 from fsspec.callbacks import NoOpCallback
