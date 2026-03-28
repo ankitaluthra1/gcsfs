@@ -231,6 +231,37 @@ async def test_async_info(async_gcs, hns_file_path):
 
 
 @pytest.mark.asyncio
+async def test_async_info_fallback(async_gcs, hns_file_path):
+    """Test that _info falls back to _ls when _call (GET) fails."""
+    # Create a dummy file to ensure listing works if we use a path under it
+    # We want to test bucket level _info fallback, so we test on the bucket itself.
+    bucket, _, _ = async_gcs.split_path(hns_file_path)
+
+    # We pipe a file to ensure the bucket is not empty. If the bucket is empty,
+    # _ls returns [], which the fallback logic evaluates as falsy, causing it
+    # to raise FileNotFoundError even if the bucket exists.
+    file_path = f"{hns_file_path}/fallback_file"
+    await async_gcs._pipe_file(file_path, b"data")
+
+    original_call = async_gcs._call
+
+    async def mock_call(*args, **kwargs):
+        if len(args) >= 2 and args[0] == "GET" and args[1] == f"b/{bucket}":
+            raise OSError("Simulated 403 Forbidden")
+        return await original_call(*args, **kwargs)
+
+    async_gcs._call = mock_call
+
+    try:
+        # Calling _info on the bucket root should fall back to _ls
+        info = await async_gcs._info(bucket)
+        assert info["name"] == bucket
+        assert info["type"] == "directory"
+    finally:
+        async_gcs._call = original_call
+
+
+@pytest.mark.asyncio
 async def test_async_rm_recursive(async_gcs, hns_file_path):
     """Test async _rm recursive."""
     base = f"{hns_file_path}/rm"
