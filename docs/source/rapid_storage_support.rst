@@ -54,7 +54,7 @@ You can interact with these buckets just like any other filesystem.
         f.write(b"checkpoint data...")
 
 
-    # Load data
+    # Load data from Rapid bucket
     logging.info(f"[INFO] Loading {dataset_path} dataset")
     ds = datasets.load_dataset("parquet",
                                data_files=f"{dataset_path}/*.parquet",
@@ -62,7 +62,7 @@ You can interact with these buckets just like any other filesystem.
                                streaming=True)
 
 
-    # checkpoint load path to GCS Rapid bucket
+    # Checkpoint load path to GCS Rapid bucket
     trainer.fit(LlamaLitModel(model),
                 train_loader,
                 ckpt_path=checkpoint_load_path)
