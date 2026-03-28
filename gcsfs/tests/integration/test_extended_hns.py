@@ -105,6 +105,40 @@ class TestExtendedGcsFileSystemMv:
         assert not gcsfs.exists(path1)
         assert gcsfs.exists(path2)
 
+    def test_hns_folder_rename_idempotency_retry_integration(self, gcs_hns):
+        """Test that retries explicitly work securely against real GCS by forcefully timing out the client."""
+        gcsfs = gcs_hns
+        path1 = f"{TEST_HNS_BUCKET}/integration_retry_old_dir_{uuid.uuid4().hex}"
+        path2 = f"{TEST_HNS_BUCKET}/integration_retry_new_dir_{uuid.uuid4().hex}"
+
+        gcsfs.pipe(f"{path1}/file.txt", b"data")
+
+        import asyncio
+
+        original_wait_for = asyncio.wait_for
+        call_count = 0
+
+        async def mocked_wait_for(coro, timeout):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Schedule the actual GCS network request in the background
+                asyncio.create_task(coro)
+                # Intentionally timeout client-side before GCS can return the response
+                await asyncio.sleep(0.01)
+                raise asyncio.TimeoutError()
+
+            return await original_wait_for(coro, timeout)
+
+        from unittest import mock
+
+        with mock.patch("gcsfs.retry.asyncio.wait_for", new=mocked_wait_for):
+            gcsfs.mv(path1, path2)
+
+        assert call_count >= 2
+        assert not gcsfs.exists(path1)
+        assert gcsfs.exists(path2)
+
     def test_file_rename_using_atomic_mv(
         self,
         gcs_hns,
