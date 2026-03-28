@@ -1921,3 +1921,89 @@ def test_mv_file_raises_error_for_specific_generation(gcs):
             gcs.mv_file(src, dest)
     finally:
         gcs.version_aware = original_version_aware
+
+
+@pytest.mark.asyncio
+async def test_info_parallel(gcs):
+    path = TEST_BUCKET + "/file"
+
+    with (
+        mock.patch.object(
+            gcs, "_get_object", new_callable=mock.AsyncMock
+        ) as mock_get_object,
+        mock.patch.object(
+            gcs, "_get_directory_info", new_callable=mock.AsyncMock
+        ) as mock_get_dir,
+    ):
+
+        # Case 1: File exists. _get_object succeeds, _get_directory_info fails.
+        mock_get_object.return_value = {"name": path, "type": "file", "size": 100}
+        mock_get_dir.side_effect = FileNotFoundError
+
+        res = await gcs._info(path)
+        assert res["type"] == "file"
+        assert mock_get_object.call_count == 1
+        assert mock_get_dir.call_count == 1
+
+        # Case 2: Directory. _get_object fails, _get_directory_info succeeds.
+        mock_get_object.reset_mock()
+        mock_get_dir.reset_mock()
+        mock_get_object.side_effect = FileNotFoundError
+        mock_get_dir.side_effect = None
+        mock_get_dir.return_value = {"name": path, "type": "directory", "size": 0}
+
+        res = await gcs._info(path)
+        assert res["type"] == "directory"
+        assert mock_get_object.call_count == 1
+        assert mock_get_dir.call_count == 1
+
+        # Case 3: Directory marker. _get_object returns marker, _get_directory_info returns dir info.
+        mock_get_object.reset_mock()
+        mock_get_dir.reset_mock()
+        mock_get_object.side_effect = None
+        # A directory marker has size 0 and ends with /
+        marker_path = path + "/"
+        mock_get_object.return_value = {
+            "name": marker_path,
+            "type": "directory",
+            "size": 0,
+        }
+        mock_get_dir.return_value = {
+            "name": path,
+            "type": "directory",
+            "size": 0,
+            "extra": "info",
+        }
+
+        res = await gcs._info(path)
+        # Should prefer directory info over marker
+        assert res["extra"] == "info"
+        assert mock_get_object.call_count == 1
+        assert mock_get_dir.call_count == 1
+
+        # Case 4: _get_object raises generic exception. Should raise immediately.
+        mock_get_object.reset_mock()
+        mock_get_dir.reset_mock()
+        mock_get_object.side_effect = Exception("Generic error")
+        mock_get_dir.side_effect = FileNotFoundError
+
+        with pytest.raises(Exception, match="Generic error"):
+            await gcs._info(path)
+
+        # Case 5: _get_object fails with FileNotFoundError, _get_directory_info raises generic exception.
+        mock_get_object.reset_mock()
+        mock_get_dir.reset_mock()
+        mock_get_object.side_effect = FileNotFoundError
+        mock_get_dir.side_effect = Exception("Directory error")
+
+        with pytest.raises(Exception, match="Directory error"):
+            await gcs._info(path)
+
+        # Case 6: Both fail with FileNotFoundError. Should raise FileNotFoundError.
+        mock_get_object.reset_mock()
+        mock_get_dir.reset_mock()
+        mock_get_object.side_effect = FileNotFoundError
+        mock_get_dir.side_effect = FileNotFoundError
+
+        with pytest.raises(FileNotFoundError):
+            await gcs._info(path)
