@@ -136,6 +136,7 @@ def gcsfs_benchmark_write(extended_gcs_factory, request):
         params,
         "benchmark-write",
         create_files=False,
+        gcs_kwargs={"block_size": params.block_size_bytes},
     )
 
 

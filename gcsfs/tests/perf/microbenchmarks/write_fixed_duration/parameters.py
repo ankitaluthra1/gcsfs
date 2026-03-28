@@ -9,5 +9,8 @@ class WriteFixedDurationBenchmarkParameters(IOBenchmarkParameters):
     Defines the parameters for a write benchmark test cases with runtime.
     """
 
+    # The block size for gcsfs file buffering.
+    block_size_bytes: int
+
     # Time in seconds the test should run.
     runtime: int
