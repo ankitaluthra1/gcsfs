@@ -811,7 +811,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             raise ValueError("maxdepth must be at least 1")
 
         if isinstance(path, str):
-            out = await self._expand_path_with_details(
+            return await self._expand_path_with_details(
                 [path], recursive, maxdepth, detail=detail
             )
         else:
@@ -916,9 +916,11 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             reverse=True,
         )
 
-        return await self._perform_rm(files, dirs, path, batchsize=batchsize)
+        return await self._perform_rm(
+            files, dirs, path, batchsize=batchsize, recursive=recursive
+        )
 
-    async def _perform_rm(self, files, dirs, path, batchsize):
+    async def _perform_rm(self, files, dirs, path, batchsize, recursive=False):
         """
         Helper method to perform the deletion of files and directories.
 
@@ -928,6 +930,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                               deepest to shallowest.
             path (str): The original path for the rm operation, for error reporting.
             batchsize (int): The number of files to delete in a single batch request.
+            recursive (bool): Whether the original rm operation was recursive.
 
         Returns:
             list: A list of exceptions that occurred during deletion.
@@ -963,6 +966,21 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             and not isinstance(ex, (FileNotFoundError, api_exceptions.NotFound))
             and "No such object" not in str(ex)
         ]
+
+        if not recursive and has_magic(str(path)):
+            # When deleting with wildcards non-recursively, we should ignore
+            # errors related to non-empty directories to match the behavior of
+            # regional buckets (where directories don't truly exist).
+            errors = [
+                e
+                for e in errors
+                if not (
+                    isinstance(e, OSError)
+                    and "not empty" in str(e)
+                    and isinstance(e.__cause__, api_exceptions.FailedPrecondition)
+                )
+            ]
+
         if errors:
             raise errors[0]
 
@@ -1000,6 +1018,8 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         For buckets with flat structure, it falls back to the parent implementation.
         """
         path = self._strip_protocol(path)
+        if maxdepth is not None and maxdepth < 1:
+            raise ValueError("maxdepth must be at least 1")
         bucket, _, _ = self.split_path(path)
 
         is_hns = await self._is_bucket_hns_enabled(bucket)
@@ -1017,6 +1037,8 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
         # Hybrid approach for HNS enabled buckets
         # 1. Fetch all files from super find() method by passing withdirs as False.
+        # We pass maxdepth as None here to ensure we fetch all files for caching,
+        # and then filter by maxdepth at the end of this method.
         files_task = asyncio.create_task(
             super()._find(
                 path,
@@ -1024,7 +1046,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 detail=True,  # Get full details for merging and populating cache
                 prefix=prefix,
                 versions=versions,
-                maxdepth=maxdepth,
+                maxdepth=None,
                 update_cache=False,  # Defer caching until merging files and folders
                 **kwargs,
             )

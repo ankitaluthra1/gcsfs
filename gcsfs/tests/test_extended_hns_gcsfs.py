@@ -1116,7 +1116,7 @@ class TestExtendedGcsFileSystemFind:
             _, call_kwargs = mocks["super_find"].call_args
             assert call_kwargs.get("withdirs") is False
             assert call_kwargs.get("detail") is True
-            assert call_kwargs.get("maxdepth") == 1
+            assert call_kwargs.get("maxdepth") is None
 
             # Assert that list_folders was called with the correct request
             expected_folder_id = "find_test/"
@@ -1415,75 +1415,6 @@ class TestExtendedGcsFileSystemInternal:
             assert result == expected_result
             mock_super_method.assert_called_once()
             fs._storage_control_client.get_folder.assert_not_called()
-
-
-# This test class validates that list API retrieves all folders for HNS buckets.
-class TestExtendedGcsFileSystemLs:
-    """Unit tests for _do_list_objects in ExtendedGcsFileSystem."""
-
-    @pytest.mark.asyncio
-    async def test_ls_hns_enabled_delimiter(self):
-        # Arrange: Mock the HNS check to return True
-        with (
-            mock.patch.object(
-                ExtendedGcsFileSystem, "_is_bucket_hns_enabled", return_value=True
-            ),
-            mock.patch(
-                "gcsfs.core.GCSFileSystem._do_list_objects", new_callable=mock.AsyncMock
-            ) as mock_super_ls,
-        ):
-            fs = ExtendedGcsFileSystem(token="anon")
-
-            # Act: Call _do_list_objects with delimiter="/"
-            await fs._do_list_objects("gs://my-bucket/path", delimiter="/")
-
-            # Assert: Verify includeFoldersAsPrefixes="true" is passed to the super method
-            mock_super_ls.assert_called_once()
-            _, kwargs = mock_super_ls.call_args
-            assert kwargs.get("includeFoldersAsPrefixes") == "true"
-            assert kwargs.get("delimiter") == "/"
-
-    @pytest.mark.asyncio
-    async def test_ls_hns_disabled(self):
-        # Arrange: Mock the HNS check to return False
-        with (
-            mock.patch.object(
-                ExtendedGcsFileSystem, "_is_bucket_hns_enabled", return_value=False
-            ),
-            mock.patch(
-                "gcsfs.core.GCSFileSystem._do_list_objects", new_callable=mock.AsyncMock
-            ) as mock_super_ls,
-        ):
-            fs = ExtendedGcsFileSystem(token="anon")
-
-            # Act: Call _do_list_objects
-            await fs._do_list_objects("gs://my-bucket/path", delimiter="/")
-
-            # Assert: Verify includeFoldersAsPrefixes is NOT present
-            mock_super_ls.assert_called_once()
-            _, kwargs = mock_super_ls.call_args
-            assert "includeFoldersAsPrefixes" not in kwargs
-
-    @pytest.mark.asyncio
-    async def test_ls_hns_enabled_non_slash_delimiter(self):
-        # Arrange: HNS is enabled, but we use a different delimiter
-        with (
-            mock.patch.object(
-                ExtendedGcsFileSystem, "_is_bucket_hns_enabled", return_value=True
-            ),
-            mock.patch(
-                "gcsfs.core.GCSFileSystem._do_list_objects", new_callable=mock.AsyncMock
-            ) as mock_super_ls,
-        ):
-            fs = ExtendedGcsFileSystem(token="anon")
-
-            # Act: Call with an empty delimiter (or any non-slash)
-            await fs._do_list_objects("gs://my-bucket/path", delimiter="")
-
-            # Assert: Verify includeFoldersAsPrefixes is NOT present
-            mock_super_ls.assert_called_once()
-            _, kwargs = mock_super_ls.call_args
-            assert "includeFoldersAsPrefixes" not in kwargs
 
 
 # This test class validates that list API retrieves all folders for HNS buckets.
@@ -2126,6 +2057,39 @@ class TestExtendedGcsFileSystemRm:
             args, _ = mock_delete_files.await_args
             assert sorted(args[0]) == sorted([file_path1, file_path2])
 
+            expected_request = self._get_delete_folder_request(gcsfs, dir_path)
+            mocks["control_client"].delete_folder.assert_called_once_with(
+                request=expected_request
+            )
+
+    def test_rm_wildcard_non_recursive_on_non_empty_dir_ignores_error(
+        self, gcs_hns, gcs_hns_mocks
+    ):
+        """Test that rm with wildcard without recursive=True on a non-empty directory ignores error."""
+        gcsfs = gcs_hns
+        dir_path = f"{TEST_HNS_BUCKET}/non_empty_dir"
+        wildcard_path = f"{TEST_HNS_BUCKET}/*"
+
+        mock_expand = mock.AsyncMock()
+
+        with (
+            gcs_hns_mocks(BucketType.HIERARCHICAL, gcsfs) as mocks,
+            mock.patch.object(gcsfs, "_expand_path_with_details", new=mock_expand),
+        ):
+            # Mock expand_path to return the directory
+            mock_expand.return_value = [{"name": dir_path, "type": "directory"}]
+
+            # Mock delete_folder to raise FailedPrecondition (directory not empty)
+            mocks["control_client"].delete_folder.side_effect = (
+                api_exceptions.FailedPrecondition("Directory not empty")
+            )
+
+            # This should NOT raise OSError because it has a wildcard and the cause is FailedPrecondition
+            gcsfs.rm(wildcard_path, recursive=False)
+
+            mock_expand.assert_called_once_with(
+                wildcard_path, recursive=False, maxdepth=None, detail=True
+            )
             expected_request = self._get_delete_folder_request(gcsfs, dir_path)
             mocks["control_client"].delete_folder.assert_called_once_with(
                 request=expected_request
