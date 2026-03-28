@@ -28,22 +28,46 @@ the underlying filesystem operations will automatically route through
 the newly added ``ExtendedGcsFileSystem`` designed to support multiple storage types like HNS and Rapid.
 You can interact with these buckets just like any other filesystem.
 
-**Code Example**
+**Code Samples**
 
 .. code-block:: python
 
-    import gcsfs
+    import fsspec
 
-    # Initialize the filesystem
-    fs = gcsfs.GCSFileSystem()
+    # Reading from a Standard bucket
+    with fsspec.open("gs://my-standard-bucket/test.txt", "r") as f:
+        data = f.read()
+
+    # Writing to a Standard bucket
+    with fs.open('my-standard-bucket/data/checkpoint.pt', 'wb') as f:
+        f.write(b"checkpoint data...")
+
+
+    import fsspec
+
+    # Reading from a Rapid bucket
+    with fsspec.open("gs://my-rapid-bucket/test.txt", "r") as f:
+        data = f.read()
 
     # Writing to a Rapid bucket
-    with fs.open('my-zonal-rapid-bucket/data/checkpoint.pt', 'wb') as f:
-        f.write(b"model data...")
+    with fs.open('my-rapid-bucket/data/checkpoint.pt', 'wb') as f:
+        f.write(b"checkpoint data...")
 
-    # Appending to an existing object (Native Rapid feature)
-    with fs.open('my-zonal-rapid-bucket/data/checkpoint.pt', 'ab') as f:
-        f.write(b"appended data...")
+
+    # Load data
+    logging.info(f"[INFO] Loading {dataset_path} dataset")
+    ds = datasets.load_dataset("parquet",
+                               data_files=f"{dataset_path}/*.parquet",
+                               split="train",
+                               streaming=True)
+
+
+    # checkpoint load path to GCS Rapid bucket
+    trainer.fit(LlamaLitModel(model),
+                train_loader,
+                ckpt_path=checkpoint_load_path)
+
+
 
 Under the Hood: The ``ExtendedGcsFileSystem`` and ``ZonalFile``
 ---------------------------------------------------------------
