@@ -1,4 +1,5 @@
 import logging
+import random
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -25,7 +26,7 @@ def _info_op(gcs, path, pattern="info"):
     except FileNotFoundError:
         pass
     duration_ms = (time.perf_counter() - start_time) * 1000
-    logging.info(f"{pattern.upper()} : {path} - {duration_ms:.2f} ms.")
+    logging.debug(f"{pattern.upper()} : {path} - {duration_ms:.2f} ms.")
 
 
 def _info_ops(gcs, paths, pattern="info"):
@@ -39,6 +40,13 @@ single_threaded_cases, multi_threaded_cases, multi_process_cases = filter_test_c
 )
 
 
+def _get_sampled_paths(target_dirs, file_paths, params):
+    paths = _get_target_paths(target_dirs, file_paths, params)
+    if len(paths) > params.sample_size:
+        return random.sample(paths, params.sample_size)
+    return paths
+
+
 @pytest.mark.parametrize(
     "gcsfs_benchmark_info",
     single_threaded_cases,
@@ -48,7 +56,7 @@ single_threaded_cases, multi_threaded_cases, multi_process_cases = filter_test_c
 def test_info_single_threaded(benchmark, gcsfs_benchmark_info, monitor):
     gcs, target_dirs, file_paths, prefix, params = gcsfs_benchmark_info
 
-    paths = _get_target_paths(target_dirs, file_paths, params)
+    paths = _get_sampled_paths(target_dirs, file_paths, params)
 
     run_single_threaded(
         benchmark,
@@ -69,7 +77,7 @@ def test_info_single_threaded(benchmark, gcsfs_benchmark_info, monitor):
 def test_info_multi_threaded(benchmark, gcsfs_benchmark_info, monitor):
     gcs, target_dirs, file_paths, prefix, params = gcsfs_benchmark_info
 
-    paths = _get_target_paths(target_dirs, file_paths, params)
+    paths = _get_sampled_paths(target_dirs, file_paths, params)
 
     run_multi_threaded(
         benchmark,
@@ -123,9 +131,8 @@ def test_info_multi_process(
 ):
     gcs, target_dirs, file_paths, prefix, params = gcsfs_benchmark_info
 
-    chunks = _chunk_list(
-        _get_target_paths(target_dirs, file_paths, params), params.processes
-    )
+    paths = _get_sampled_paths(target_dirs, file_paths, params)
+    chunks = _chunk_list(paths, params.processes)
 
     def args_builder(gcs_instance, i, shared_arr):
         return (

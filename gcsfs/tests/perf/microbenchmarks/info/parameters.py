@@ -13,3 +13,6 @@ class InfoBenchmarkParameters(ListingBenchmarkParameters):
 
     # The type of target to query: "bucket", "folder", or "file".
     target_type: str
+
+    # The number of paths to sample for info operations.
+    sample_size: int

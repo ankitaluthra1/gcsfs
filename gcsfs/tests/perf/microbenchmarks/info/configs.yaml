@@ -4,8 +4,11 @@ common:
     - "zonal"
     - "hns"
   files:
-    - 100
+    - 65536
+    - 131072
   folders:
+    - 256
+  sample_size:
     - 100
 
 scenarios:
