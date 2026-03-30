@@ -354,7 +354,7 @@ def test_rm_chunked_batch(gcs):
         assert fn not in files_removed
 
 
-def test_rm_wildcards_and_lists(gcs):
+def test_rm_wildcards_in_directory(gcs):
     base_dir = f"{TEST_BUCKET}/test_rm_complex_{uuid.uuid4().hex}"
     files = [
         f"{base_dir}/file1.txt",
@@ -389,7 +389,10 @@ def test_rm_wildcards_and_lists(gcs):
     gcs.rm(f"{base_dir}/**", recursive=True)
     assert not gcs.exists(base_dir)
 
-    # 5. Test 'bucket/*' (non-recursive)
+
+def test_rm_wildcard_bucket_non_recursive(gcs):
+    """Tests non-recursive rm with a wildcard at the bucket root."""
+    # Test 'bucket/*' (non-recursive)
     new_bucket = f"gcsfs-test-rm-{uuid.uuid4().hex}"
     gcs.mkdir(new_bucket)
     try:
@@ -401,7 +404,10 @@ def test_rm_wildcards_and_lists(gcs):
     finally:
         gcs.rm(new_bucket, recursive=True)
 
-    # 6. Test 'bucket/*' (recursive)
+
+def test_rm_wildcard_bucket_recursive(gcs):
+    """Tests recursive rm with a wildcard at the bucket root."""
+    # Test 'bucket/*' (recursive)
     new_bucket = f"gcsfs-test-rm-recursive-{uuid.uuid4().hex}"
     gcs.mkdir(new_bucket)
     try:
