@@ -53,7 +53,7 @@ Important Differences to Keep in Mind
 While ``gcsfs`` aims to abstract the differences via the ``fsspec`` API, you should be aware of standard HNS limitations imposed by the Google Cloud Storage API:
 
 1. **Implicit directories:** In standard GCS, you can create an object ``a/b/c.txt`` without the directories ``a/`` or ``a/b/`` physically existing. In HNS, the parent folder resources must exist (or be created) before the object can be written. ``gcsfs`` handles parent folder creation natively under the hood.
-2. **``mkdir`` behavior:** Previously, in a flat namespace, calling ``mkdir`` on a path could only ensure the underlying bucket exists. With HNS enabled, calling ``mkdir`` will create an actual folder resource in GCS. Furthermore, if you want to create nested folders (eg: bucket/a/b/c/d) pass ``create_parents=True``, it will physically create all intermediate folder resources along the specified path.
+2. **``mkdir`` behavior:** Previously, in a flat namespace, calling ``mkdir`` on a path could only ensure the underlying bucket exists. With HNS enabled, calling ``mkdir`` will create an actual folder resource in GCS. Furthermore, if you want to create nested folders (eg: bucket/a/b/c/d), pass ``create_parents=True``, it will physically create all intermediate folder resources along the specified path.
 3. **No mixing or toggling:** You cannot toggle HNS on an existing flat-namespace bucket. You must create a new HNS bucket and migrate your data.
 4. **Object naming:** Object names in HNS cannot end with a slash (``/``) unless without the creation of physical folder resources.
 5. **Rename Operation Benchmarks**

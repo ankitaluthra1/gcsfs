@@ -49,7 +49,7 @@ expect exceptions.
 Furthermore:
 
    - although mutation operations tentatively work, you should not at the moment
-     depend on gcsfuse as a reliable system that won't loose your data.
+     depend on gcsfuse as a reliable system that won't lose your data.
 
    - permissions on GCS are complicated, so all files will be shown as fully-open
      0o777, regardless of state. If a read fails, you likely don't have the right
