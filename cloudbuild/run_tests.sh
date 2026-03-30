@@ -56,13 +56,15 @@ case "$TEST_SUITE" in
     # - test_core_versioned.py: HNS buckets do not support versioning.
     # - test_core.py::test_sign: Current Cloud Build auth setup does not support this.
     # - test_core.py::test_mv_file_cache: Integration test only applicable for regional buckets.
+    # - test_core.py::test_rm_wildcards_non_recursive: HNS buckets have different behavior for non-recursive wildcard deletion.
     pytest "${ARGS[@]}" gcsfs/ \
       --deselect gcsfs/tests/test_extended_gcsfs.py \
       --deselect gcsfs/tests/test_zonal_file.py \
       --deselect gcsfs/tests/test_extended_gcsfs_unit.py \
       --deselect gcsfs/tests/test_core_versioned.py \
       --deselect gcsfs/tests/test_core.py::test_sign \
-      --deselect gcsfs/tests/test_core.py::test_mv_file_cache
+      --deselect gcsfs/tests/test_core.py::test_mv_file_cache \
+      --deselect gcsfs/tests/test_core.py::test_rm_wildcards_non_recursive
     ;;
 
   "zonal-core")
