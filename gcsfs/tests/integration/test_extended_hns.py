@@ -1052,6 +1052,28 @@ class TestExtendedGcsFileSystemFindIntegration:
         }
         assert not empty_dir_listing
 
+    def test_find_maxdepth_updates_cache(self, gcs_hns, test_structure):
+        """Test that find with maxdepth updates cache for deeper objects."""
+        base_dir = test_structure["base_dir"]
+        gcs_hns.invalidate_cache()
+        assert not gcs_hns.dircache
+
+        # Run find with maxdepth=1
+        # This should return root_file, empty_dir, dir_with_files
+        # But it should also cache objects within dir_with_files, etc.
+        result = gcs_hns.find(base_dir, maxdepth=1)
+        assert test_structure["root_file"] in result
+        assert test_structure["file1"] not in result
+
+        # Verify that the cache is populated for deeper objects even if not returned
+        # from find due to maxdepth filter
+        assert test_structure["dir_with_files"] in gcs_hns.dircache
+        dir_with_files_cache = {
+            d["name"] for d in gcs_hns.dircache[test_structure["dir_with_files"]]
+        }
+        assert test_structure["file1"] in dir_with_files_cache
+        assert test_structure["nested_dir"] in dir_with_files_cache
+
     def test_find_does_not_update_dircache_with_prefix(self, gcs_hns, test_structure):
         """Test that find() does NOT populate the dircache when a prefix is given."""
         base_dir = test_structure["base_dir"]
