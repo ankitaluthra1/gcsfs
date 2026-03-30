@@ -41,5 +41,3 @@ def test_rename_recursive(benchmark, gcsfs_benchmark_rename, monitor):
         (gcs, prefix, prefix_renamed),
         BENCHMARK_GROUP,
     )
-    # Adding a sleep of 60 secs here to ensure that deletion works
-    time.sleep(60)
