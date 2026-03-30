@@ -118,7 +118,7 @@ case "$TEST_SUITE" in
       "--deselect=gcsfs/tests/test_core.py::test_array"
       "--deselect=gcsfs/tests/test_core.py::test_sign"
       "--deselect=gcsfs/tests/test_core.py::test_mv_file_cache"
-      "--deselect gcsfs/tests/test_core.py::test_rm_wildcards_non_recursive"
+      "--deselect=gcsfs/tests/test_core.py::test_rm_wildcards_non_recursive"
     )
 
     pytest "${ARGS[@]}" "${ZONAL_DESELECTS[@]}" gcsfs/tests/test_core.py
