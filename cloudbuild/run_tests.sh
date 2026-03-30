@@ -109,6 +109,7 @@ case "$TEST_SUITE" in
     # - test_array fails due to CRC32C TypeError with array objects.
     # - test_sign fails because it requires a private key
     # - test_mv_file_cache: Integration test only applicable for regional buckets.
+    # - test_rm_wildcards_non_recursive: HNS buckets have different behavior for non-recursive wildcard deletion.
     ZONAL_DESELECTS+=(
       "--deselect=gcsfs/tests/test_core.py::test_flush"
       "--deselect=gcsfs/tests/test_core.py::test_write_blocks"
@@ -117,6 +118,7 @@ case "$TEST_SUITE" in
       "--deselect=gcsfs/tests/test_core.py::test_array"
       "--deselect=gcsfs/tests/test_core.py::test_sign"
       "--deselect=gcsfs/tests/test_core.py::test_mv_file_cache"
+      "--deselect gcsfs/tests/test_core.py::test_rm_wildcards_non_recursive"
     )
 
     pytest "${ARGS[@]}" "${ZONAL_DESELECTS[@]}" gcsfs/tests/test_core.py
