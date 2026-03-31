@@ -2456,3 +2456,35 @@ async def test_info_parallel(gcs):
         with pytest.raises(FileNotFoundError):
             await gcs._info(path)
 
+
+
+
+@pytest.mark.asyncio
+async def test_info_parallel_dir_first(gcs):
+    import asyncio
+
+    path = TEST_BUCKET + "/dir"
+
+    with (
+        mock.patch.object(
+            gcs, "_get_object", new_callable=mock.AsyncMock
+        ) as mock_get_object,
+        mock.patch.object(
+            gcs, "_get_directory_info", new_callable=mock.AsyncMock
+        ) as mock_get_dir,
+    ):
+
+        # Make _get_object slower than _get_directory_info
+        async def slow_get_object(*args, **kwargs):
+            await asyncio.sleep(0.1)
+            return {"name": path, "type": "file", "size": 100}
+
+        mock_get_object.side_effect = slow_get_object
+        # Directory check finishes immediately and succeeds
+        mock_get_dir.return_value = {"name": path, "type": "directory", "size": 0}
+
+        res = await gcs._info(path)
+        assert res["type"] == "directory"
+        assert mock_get_object.call_count == 1
+        assert mock_get_dir.call_count == 1
+
