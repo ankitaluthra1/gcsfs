@@ -1081,31 +1081,35 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                 "type": "directory",
             }
 
-        # Check both exact file path and directory info in parallel to distinguish file, directory, or not found
-        exact_task = asyncio.create_task(self._get_object(path))
-        dir_task = asyncio.create_task(
-            self._get_directory_info(path, bucket, key, generation)
-        )
-        try:
-            tasks = {exact_task, dir_task}
+        from .concurrency import parallel_tasks_first_completed
 
-            while tasks:
-                done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        async with parallel_tasks_first_completed(
+            [
+                self._get_object(path),
+                self._get_directory_info(path, bucket, key, generation),
+            ]
+        ) as (tasks, done, pending):
+            exact_task, dir_task = tasks
 
-                for task in done:
-                    if task is exact_task:
-                        try:
-                            exact_res = task.result()
-                            if not _is_directory_marker(exact_res):
-                                return exact_res
-                        except FileNotFoundError:
-                            pass
-                    tasks.remove(task)
+            if exact_task in done:
+                try:
+                    exact_res = exact_task.result()
+                    if not _is_directory_marker(exact_res):
+                        return exact_res
+                except FileNotFoundError:
+                    pass
+                if dir_task in done:
+                    return dir_task.result()
+                return await dir_task
 
-            return dir_task.result()
-        finally:
-            dir_task.cancel()
-            exact_task.cancel()
+            try:
+                dir_res = dir_task.result()
+                if dir_res:
+                    return dir_res
+            except FileNotFoundError:
+                pass
+
+            return await exact_task
 
     async def _get_directory_info(self, path, bucket, key, generation):
         """
