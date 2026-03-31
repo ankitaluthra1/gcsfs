@@ -42,8 +42,8 @@ incident to the fsspec core team.
 Reporting
 ---------
 
-If you believe someone is violating theCode of Conduct we ask that you report it
-to the  Project by emailing community@anaconda.com. All reports will be kept
+If you believe someone is violating the Code of Conduct we ask that you report it
+to the Project by emailing community@anaconda.com. All reports will be kept
 confidential. In some cases we may determine that a public statement will need
 to be made. If that's the case, the identities of all victims and reporters
 will remain confidential unless those individuals instruct us otherwise.
@@ -93,7 +93,7 @@ Following this declaration, they will not be provided with any confidential
 details from the reporter.
 
 Once the working group has a complete account of the events they will make a
-decision as to how to response. Responses may include:
+decision as to how to respond. Responses may include:
 
 - Nothing (if we determine no violation occurred).
 - A private reprimand from the working group to the individual(s) involved.
