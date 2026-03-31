@@ -1,3 +1,4 @@
+import concurrent.futures
 import io
 import os
 import uuid
@@ -8,6 +9,7 @@ from unittest import mock
 from urllib.parse import parse_qs, unquote, urlparse
 from uuid import uuid4
 
+import fsspec.asyn
 import fsspec.core
 import pytest
 import requests
@@ -1921,3 +1923,178 @@ def test_mv_file_raises_error_for_specific_generation(gcs):
             gcs.mv_file(src, dest)
     finally:
         gcs.version_aware = original_version_aware
+
+
+def test_cat_file_routing_and_thresholds(gcs):
+    fn = f"{TEST_BUCKET}/core_routing.txt"
+    # Create an 8MB file
+    data = os.urandom(8 * 1024 * 1024)
+    gcs.pipe(fn, data)
+
+    # 1. Concurrency = 1 (Should route to sequential)
+    with mock.patch.object(
+        gcs, "_cat_file_sequential", wraps=gcs._cat_file_sequential
+    ) as mock_seq:
+        with mock.patch.object(
+            gcs, "_cat_file_concurrent", wraps=gcs._cat_file_concurrent
+        ) as mock_conc:
+            res = fsspec.asyn.sync(
+                gcs.loop, gcs._cat_file, fn, start=0, end=1024, concurrency=1
+            )
+            assert res == data[:1024]
+            assert mock_seq.call_count == 1
+            assert mock_conc.call_count == 0
+
+    # 2. Concurrency = 4, but read size (1MB) is < MIN_CHUNK_SIZE_FOR_CONCURRENCY (5MB)
+    with mock.patch.object(
+        gcs, "_cat_file_sequential", wraps=gcs._cat_file_sequential
+    ) as mock_seq:
+        with mock.patch.object(
+            gcs, "_cat_file_concurrent", wraps=gcs._cat_file_concurrent
+        ) as mock_conc:
+            res = fsspec.asyn.sync(
+                gcs.loop, gcs._cat_file, fn, start=0, end=1024 * 1024, concurrency=4
+            )
+            assert res == data[: 1024 * 1024]
+            # It hits the concurrent wrapper, but bails out to sequential internally
+            assert mock_conc.call_count == 1
+            assert mock_seq.call_count == 1
+
+    # 3. Concurrency = 4, and read size (8MB) >= MIN_CHUNK_SIZE_FOR_CONCURRENCY (5MB)
+    with mock.patch.object(
+        gcs, "_cat_file_sequential", wraps=gcs._cat_file_sequential
+    ) as mock_seq:
+        res = fsspec.asyn.sync(
+            gcs.loop, gcs._cat_file, fn, start=0, end=8 * 1024 * 1024, concurrency=4
+        )
+        assert res == data
+        # Should call sequential 4 times (once for each concurrent chunk)
+        assert mock_seq.call_count == 4
+
+
+def test_cat_file_concurrent_data_integrity(gcs):
+    fn = f"{TEST_BUCKET}/core_integrity.txt"
+    file_size = 20 * 1024 * 1024  # 20MB
+    data = os.urandom(file_size)
+    gcs.pipe(fn, data)
+
+    res = fsspec.asyn.sync(
+        gcs.loop, gcs._cat_file_concurrent, fn, start=0, end=file_size, concurrency=7
+    )
+    assert len(res) == file_size
+    assert res == data
+
+
+def test_cat_file_concurrent_exception_cancellation(gcs):
+    fn = f"{TEST_BUCKET}/core_exception.txt"
+    data = b"0123456789" * 6000000  # ~6MB
+    gcs.pipe(fn, data)
+
+    original_seq = gcs._cat_file_sequential
+
+    async def mock_fail_seq(path, start, end, **kwargs):
+        if start > 0:  # Force failure on the 2nd chunk
+            raise OSError("Simulated HTTP Timeout")
+        return await original_seq(path, start, end, **kwargs)
+
+    with mock.patch.object(gcs, "_cat_file_sequential", side_effect=mock_fail_seq):
+        with pytest.raises(OSError, match="Simulated HTTP Timeout"):
+            fsspec.asyn.sync(
+                gcs.loop,
+                gcs._cat_file_concurrent,
+                fn,
+                start=0,
+                end=len(data),
+                concurrency=4,
+            )
+
+
+def test_gcsfile_prefetch_disabled_fallback(gcs):
+    """Verify that omitting the flag entirely skips the prefetcher initialization."""
+    fn = f"{TEST_BUCKET}/no_prefetch.txt"
+    gcs.pipe(fn, b"HelloWorld")
+
+    with gcs.open(fn, "rb", use_experimental_adaptive_prefetching=False) as f:
+        assert getattr(f, "_prefetch_engine", None) is None
+        assert f.read() == b"HelloWorld"
+
+
+def test_gcsfile_prefetch_sequential_integrity(gcs):
+    fn = f"{TEST_BUCKET}/integrated_seq.txt"
+    file_size = 10 * 1024 * 1024
+    data = os.urandom(file_size)
+    gcs.pipe(fn, data)
+
+    with gcs.open(
+        fn, "rb", use_experimental_adaptive_prefetching=True, block_size=2 * 1024 * 1024
+    ) as f:
+        assert f._prefetch_engine is not None
+
+        chunks = []
+        while True:
+            chunk = f.read(1024 * 1024)  # Read 1MB at a time
+            if not chunk:
+                break
+            chunks.append(chunk)
+
+        assert b"".join(chunks) == data
+
+
+def test_gcsfile_prefetch_random_seek_integrity(gcs):
+    fn = f"{TEST_BUCKET}/integrated_random.txt"
+    file_size = 5 * 1024 * 1024
+    data = os.urandom(file_size)
+    gcs.pipe(fn, data)
+
+    import random
+
+    random.seed(42)
+
+    with gcs.open(
+        fn, "rb", use_experimental_adaptive_prefetching=True, block_size=1024 * 1024
+    ) as f:
+        for _ in range(50):
+            start = random.randint(0, file_size - 1000)
+            length = random.randint(1, 1000)
+
+            f.seek(start)
+            chunk = f.read(length)
+
+            assert len(chunk) == length
+            assert chunk == data[start : start + length]
+
+
+def test_gcsfile_multithreaded_read_integrity(gcs):
+    fn = f"{TEST_BUCKET}/integrated_mt.txt"
+    file_size = 15 * 1024 * 1024
+    data = os.urandom(file_size)
+    gcs.pipe(fn, data)
+
+    with gcs.open(
+        fn, "rb", use_experimental_adaptive_prefetching=True, block_size=2 * 1024 * 1024
+    ) as f:
+
+        def thread_worker(start, size):
+            return f._fetch_range(start, start + size)
+
+        chunk_size = 3 * 1024 * 1024
+        futures = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            for i in range(5):
+                start_offset = i * chunk_size
+                futures.append(executor.submit(thread_worker, start_offset, chunk_size))
+
+        results = [fut.result() for fut in futures]
+        stitched_data = b"".join(results)
+
+        assert len(stitched_data) == file_size
+        assert stitched_data == data
+
+
+def test_gcsfile_not_satisfiable_range(gcs):
+    fn = f"{TEST_BUCKET}/integrated_eof.txt"
+    gcs.pipe(fn, b"12345")
+
+    with gcs.open(fn, "rb", use_experimental_adaptive_prefetching=True) as f:
+        res = f._fetch_range(100, 200)
+        assert res == b""

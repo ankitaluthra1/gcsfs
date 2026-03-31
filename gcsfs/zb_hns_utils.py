@@ -11,6 +11,7 @@ from google.cloud.storage.asyncio.async_multi_range_downloader import (
 )
 
 MRD_MAX_RANGES = 1000  # MRD supports up to 1000 ranges per request
+DEFAULT_CONCURRENCY = 4
 logger = logging.getLogger("gcsfs")
 
 
