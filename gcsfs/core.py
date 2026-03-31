@@ -27,6 +27,7 @@ from fsspec.utils import setup_logging, stringify_path
 
 from . import __version__ as version
 from .checkers import get_consistency_checker
+from .concurrency import parallel_tasks_first_completed
 from .credentials import GoogleCredentials
 from .inventory_report import InventoryReport
 from .retry import errs, retry_request, validate_response
@@ -1080,8 +1081,6 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                 "storageClass": "DIRECTORY",
                 "type": "directory",
             }
-
-        from .concurrency import parallel_tasks_first_completed
 
         async with parallel_tasks_first_completed(
             [
