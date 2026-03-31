@@ -811,7 +811,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             raise ValueError("maxdepth must be at least 1")
 
         if isinstance(path, str):
-            out = await self._expand_path_with_details(
+            return await self._expand_path_with_details(
                 [path], recursive, maxdepth, detail=detail
             )
         else:
@@ -1000,6 +1000,8 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         For buckets with flat structure, it falls back to the parent implementation.
         """
         path = self._strip_protocol(path)
+        if maxdepth is not None and maxdepth < 1:
+            raise ValueError("maxdepth must be at least 1")
         bucket, _, _ = self.split_path(path)
 
         is_hns = await self._is_bucket_hns_enabled(bucket)
@@ -1017,6 +1019,8 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
         # Hybrid approach for HNS enabled buckets
         # 1. Fetch all files from super find() method by passing withdirs as False.
+        # We pass maxdepth as None here to ensure we fetch all files for caching,
+        # and then filter by maxdepth at the end of this method.
         files_task = asyncio.create_task(
             super()._find(
                 path,
@@ -1024,7 +1028,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 detail=True,  # Get full details for merging and populating cache
                 prefix=prefix,
                 versions=versions,
-                maxdepth=maxdepth,
+                maxdepth=None,
                 update_cache=False,  # Defer caching until merging files and folders
                 **kwargs,
             )

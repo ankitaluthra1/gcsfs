@@ -1116,7 +1116,7 @@ class TestExtendedGcsFileSystemFind:
             _, call_kwargs = mocks["super_find"].call_args
             assert call_kwargs.get("withdirs") is False
             assert call_kwargs.get("detail") is True
-            assert call_kwargs.get("maxdepth") == 1
+            assert call_kwargs.get("maxdepth") is None
 
             # Assert that list_folders was called with the correct request
             expected_folder_id = "find_test/"
