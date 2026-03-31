@@ -136,9 +136,9 @@ def test_producer_concurrency_streak_and_min_chunk():
     original_min_chunk = bp.producer.MIN_CHUNK_SIZE
     bp.producer.MIN_CHUNK_SIZE = 10
 
-    bp._fetch(0, 50)
-    bp._fetch(50, 100)
-    bp._fetch(100, 150)
+    # Do 6 reads to push the streak well past the MIN_STREAKS threshold
+    for i in range(6):
+        bp._fetch(i * 50, (i + 1) * 50)
 
     fsspec.asyn.sync(bp.loop, asyncio.sleep, 0.1)
 
@@ -507,7 +507,9 @@ def test_producer_min_chunk_inner_break():
     async def trigger_loop():
         bp.producer.current_offset = 250
         bp.consumer.offset = 0
-        bp.consumer.sequential_streak = 3  # makes prefetch_size = (3+1) * 100 = 400
+        # streak=6 makes prefetch_multiplier = 4 (6 - 3 + 1)
+        # prefetch_size = 4 * 100 = 400
+        bp.consumer.sequential_streak = 6
         bp.wakeup_event.set()
         await asyncio.sleep(0.05)
 
