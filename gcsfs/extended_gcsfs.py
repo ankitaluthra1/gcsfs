@@ -916,11 +916,9 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             reverse=True,
         )
 
-        return await self._perform_rm(
-            files, dirs, path, batchsize=batchsize, recursive=recursive
-        )
+        return await self._perform_rm(files, dirs, path, batchsize=batchsize)
 
-    async def _perform_rm(self, files, dirs, path, batchsize, recursive=False):
+    async def _perform_rm(self, files, dirs, path, batchsize):
         """
         Helper method to perform the deletion of files and directories.
 
@@ -930,7 +928,6 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                               deepest to shallowest.
             path (str): The original path for the rm operation, for error reporting.
             batchsize (int): The number of files to delete in a single batch request.
-            recursive (bool): Whether the original rm operation was recursive.
 
         Returns:
             list: A list of exceptions that occurred during deletion.
@@ -966,20 +963,6 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             and not isinstance(ex, (FileNotFoundError, api_exceptions.NotFound))
             and "No such object" not in str(ex)
         ]
-
-        if not recursive and has_magic(str(path)):
-            # When deleting with wildcards non-recursively, we should ignore
-            # errors related to non-empty directories to match the behavior of
-            # regional buckets (where directories don't truly exist).
-            errors = [
-                e
-                for e in errors
-                if not (
-                    isinstance(e, OSError)
-                    and "not empty" in str(e)
-                    and isinstance(e.__cause__, api_exceptions.FailedPrecondition)
-                )
-            ]
 
         if errors:
             raise errors[0]
