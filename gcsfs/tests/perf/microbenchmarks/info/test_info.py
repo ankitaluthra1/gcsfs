@@ -79,12 +79,15 @@ def test_info_multi_threaded(benchmark, gcsfs_benchmark_info, monitor):
 
     paths = _get_sampled_paths(target_dirs, file_paths, params)
 
+    chunks = _chunk_list(paths, params.threads)
+    args_list = [(gcs, chunks[i], params.pattern) for i in range(params.threads)]
+
     run_multi_threaded(
         benchmark,
         monitor,
         params,
         _info_ops,
-        (gcs, paths, params.pattern),
+        args_list,
         BENCHMARK_GROUP,
     )
 
