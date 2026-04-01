@@ -36,7 +36,7 @@ When running tests against a real GCS endpoint, you have two options for test bu
   during final cleanup.
 
 End-to-end Testing CI Pipeline
----------------------------
+------------------------------
 
 We have a Cloud Build pipeline for end-to-end tests which includes tests on zonal
 and regional buckets. When a pull request is created for the ``main`` branch,

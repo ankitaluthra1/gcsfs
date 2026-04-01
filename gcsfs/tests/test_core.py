@@ -473,7 +473,7 @@ def test_rm_chunked_batch(gcs):
         assert fn not in files_removed
 
 
-def test_rm_wildcards_and_lists(gcs):
+def test_rm_wildcards_in_directory(gcs):
     base_dir = f"{TEST_BUCKET}/test_rm_complex_{uuid.uuid4().hex}"
     files = [
         f"{base_dir}/file1.txt",
@@ -500,20 +500,18 @@ def test_rm_wildcards_and_lists(gcs):
     assert gcs.exists(files[2])
     assert gcs.exists(files[5])  # subdir file still exists
 
-    # 3. Test 'base_dir/*' (non-recursive)
-    gcs.rm(f"{base_dir}/*")
-    assert not gcs.exists(files[2])
-    assert gcs.exists(files[5])  # subdir file still exists
-
-    # 4. Test non-matching pattern
+    # 3. Test non-matching pattern
     with pytest.raises(FileNotFoundError):
         gcs.rm(f"{base_dir}/non_existent*")
 
-    # 5. Test recursive wildcard cleanup
+    # 4. Test recursive wildcard cleanup
     gcs.rm(f"{base_dir}/**", recursive=True)
     assert not gcs.exists(base_dir)
 
-    # 6. Test 'bucket/*' (non-recursive)
+
+def test_rm_wildcard_bucket_non_recursive(gcs):
+    """Tests non-recursive rm with a wildcard at the bucket root."""
+    # Test 'bucket/*' (non-recursive)
     new_bucket = f"gcsfs-test-rm-{uuid.uuid4().hex}"
     gcs.mkdir(new_bucket)
     try:
@@ -525,7 +523,10 @@ def test_rm_wildcards_and_lists(gcs):
     finally:
         gcs.rm(new_bucket, recursive=True)
 
-    # 7. Test 'bucket/*' (recursive)
+
+def test_rm_wildcard_bucket_recursive(gcs):
+    """Tests recursive rm with a wildcard at the bucket root."""
+    # Test 'bucket/*' (recursive)
     new_bucket = f"gcsfs-test-rm-recursive-{uuid.uuid4().hex}"
     gcs.mkdir(new_bucket)
     try:
@@ -537,6 +538,20 @@ def test_rm_wildcards_and_lists(gcs):
     finally:
         if gcs.exists(new_bucket):
             gcs.rm(new_bucket, recursive=True)
+
+
+def test_rm_wildcards_non_recursive(gcs):
+    base_dir = f"{TEST_BUCKET}/test_rm_asterisk_{uuid.uuid4().hex}"
+    files = [
+        f"{base_dir}/other.txt",
+        f"{base_dir}/subdir/nested.txt",
+    ]
+    for f in files:
+        gcs.touch(f)
+
+    gcs.rm(f"{base_dir}/*")
+    assert not gcs.exists(files[0])
+    assert gcs.exists(files[1])  # subdir file still exists
 
 
 def test_file_access(gcs):

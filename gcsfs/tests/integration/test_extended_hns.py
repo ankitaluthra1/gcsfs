@@ -958,6 +958,26 @@ class TestExtendedGcsFileSystemRm:
 
         assert not gcsfs.exists(base_dir)
 
+    def test_rm_wildcards_non_recursive(self, gcs_hns):
+        """Test 'base_dir/*' (non-recursive) raises an error on non-empty directories for HNS buckets."""
+        gcsfs = gcs_hns
+        base_dir = f"{TEST_HNS_BUCKET}/test_rm_asterisk_{uuid.uuid4().hex}"
+        files = [
+            f"{base_dir}/other.txt",
+            f"{base_dir}/subdir/nested.txt",
+        ]
+        for f in files:
+            gcsfs.touch(f)
+
+        # 3. Test 'base_dir/*' (non-recursive)
+        # For HNS, this matches `other.txt` and `subdir`. Because `subdir` is not empty,
+        # delete_folder raises FailedPrecondition, which currently wraps to OSError.
+        with pytest.raises(OSError, match="Pre condition failed"):
+            gcsfs.rm(f"{base_dir}/*")
+
+        assert not gcsfs.exists(files[0])
+        assert gcsfs.exists(files[1])  # subdir file still exists
+
 
 @pytest.fixture()
 def test_structure(gcs_hns):
@@ -1092,7 +1112,9 @@ class TestExtendedGcsFileSystemFindIntegration:
         }
         assert not empty_dir_listing
 
-        # Test that find with maxdepth updates cache for deeper objects
+    def test_find_maxdepth_updates_cache(self, gcs_hns, test_structure):
+        """Test that find with maxdepth updates cache for deeper objects."""
+        base_dir = test_structure["base_dir"]
         gcs_hns.invalidate_cache()
         assert not gcs_hns.dircache
 

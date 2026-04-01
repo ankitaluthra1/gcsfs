@@ -1,8 +1,9 @@
-name: s3fs
+name: gcsfs
 channels:
   - defaults
 dependencies:
   - python= 3.10
   - docutils<0.17
+  - setuptools<81
   - sphinx
   - sphinx_rtd_theme
