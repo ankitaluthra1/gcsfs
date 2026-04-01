@@ -43,7 +43,7 @@ single_threaded_cases, multi_threaded_cases, multi_process_cases = filter_test_c
 def _get_sampled_paths(target_dirs, file_paths, params):
     paths = _get_target_paths(target_dirs, file_paths, params)
     if len(paths) > params.sample_size:
-        return random.sample(paths, params.sample_size)
+        return random.Random(1).sample(paths, params.sample_size)
     return paths
 
 
