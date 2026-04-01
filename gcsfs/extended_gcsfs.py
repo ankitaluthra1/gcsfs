@@ -460,6 +460,13 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             )
             return
 
+        if (
+            isinstance(path1, list)
+            or isinstance(path2, list)
+            or (isinstance(path1, str) and has_magic(path1))
+        ):
+            return await super()._mv(path1, path2, **kwargs)
+
         bucket1, key1, _ = self.split_path(path1)
         bucket2, key2, _ = self.split_path(path2)
 

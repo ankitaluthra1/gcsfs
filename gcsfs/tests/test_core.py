@@ -788,6 +788,8 @@ def test_copy_errors(gcs):
 
 
 def test_move(gcs):
+    if not gcs.on_google:
+        pytest.skip("emulator does not support moveTo")
     fn = TEST_BUCKET + "/test/accounts.1.json"
     data = gcs.cat(fn)
     gcs.mv(fn, fn + "2")
@@ -796,6 +798,8 @@ def test_move(gcs):
 
 
 def test_move_recursive_no_slash(gcs):
+    if not gcs.on_google:
+        pytest.skip("emulator does not support moveTo")
     # See issue #489
     dir_from = TEST_BUCKET + "/nested"
     dir_to = TEST_BUCKET + "/new_name"
@@ -806,6 +810,8 @@ def test_move_recursive_no_slash(gcs):
 
 
 def test_move_recursive_with_slash(gcs):
+    if not gcs.on_google:
+        pytest.skip("emulator does not support moveTo")
     # See issue #489
     dir_from = TEST_BUCKET + "/nested/"
     dir_to = TEST_BUCKET + "/new_name_with_slash"
@@ -813,6 +819,22 @@ def test_move_recursive_with_slash(gcs):
     gcs.mv(dir_from, dir_to, recursive=True)
     assert not gcs.exists(dir_from.rstrip("/"))
     assert gcs.ls(dir_to) == [dir_to + "/file1", dir_to + "/file2", dir_to + "/nested2"]
+
+
+def test_move_list(gcs):
+    if not gcs.on_google:
+        pytest.skip("emulator does not support moveTo")
+    fn1 = TEST_BUCKET + "/test/accounts.1.json"
+    fn2 = TEST_BUCKET + "/test/accounts.2.json"
+    data1 = gcs.cat(fn1)
+    data2 = gcs.cat(fn2)
+
+    gcs.mv([fn1, fn2], TEST_BUCKET + "/test2/")
+
+    assert gcs.cat(TEST_BUCKET + "/test2/accounts.1.json") == data1
+    assert gcs.cat(TEST_BUCKET + "/test2/accounts.2.json") == data2
+    assert not gcs.exists(fn1)
+    assert not gcs.exists(fn2)
 
 
 def test_mv_file(gcs):
@@ -2088,6 +2110,8 @@ def test_sign(gcs, monkeypatch):
 
 @pytest.mark.xfail(reason="emulator does not support condition")
 def test_write_x_mpu(gcs):
+    # if not gcs.on_google:
+    #     pytest.skip("emulator does not support condition")
     fn = TEST_BUCKET + "/test.file"
     with gcs.open(fn, mode="xb", block_size=5 * 2**20) as f:
         assert f.mode == "xb"
