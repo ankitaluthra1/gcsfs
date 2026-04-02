@@ -2484,7 +2484,8 @@ async def test_info_parallel_dir_first(gcs):
         mock_get_dir.return_value = {"name": path, "type": "directory", "size": 0}
 
         res = await gcs._info(path)
-        assert res["type"] == "directory"
+        assert res["type"] == "file"
+
         assert mock_get_object.call_count == 1
         assert mock_get_dir.call_count == 1
 
