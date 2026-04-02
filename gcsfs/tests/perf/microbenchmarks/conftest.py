@@ -191,7 +191,7 @@ def _benchmark_listing_fixture_helper(
 
             levels[d] = current_level_folders
 
-    # Create empyt folders first if specified
+    # Create empty folders first if specified
     if create_folders:
         logging.info(
             f"Setting up benchmark '{params.name}': creating {len(target_dirs)} "

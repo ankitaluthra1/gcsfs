@@ -6,15 +6,21 @@ class InfoConfigurator(ListingConfigurator):
     param_class = InfoBenchmarkParameters
 
     def _get_folders_list(self, scenario, common_config):
-        return common_config.get("folders", [1])
+        return scenario.get("folders", [1])
 
     def _get_files_list(self, scenario, common_config):
-        return common_config.get("files", [1])
+        return scenario.get("files", [1])
 
     def _get_extra_iterables(self, scenario, common_config):
+        target_types = scenario.get("target_type")
+        if target_types:
+            if isinstance(target_types, str):
+                target_types = [target_types]
+        else:
+            target_types = scenario.get("target_types", ["bucket", "folder", "file"])
+
         return [
-            scenario.get("target_types", ["bucket", "folder", "file"]),
-            scenario.get("sample_size", common_config.get("sample_size", [100])),
+            target_types,
         ]
 
     def _create_case_name(
@@ -30,10 +36,9 @@ class InfoConfigurator(ListingConfigurator):
         *extra_values,
     ):
         target_type = extra_values[0]
-        sample_size = extra_values[1]
         name = (
             f"{scenario_name}_{procs}procs_{threads}threads_"
-            f"{files}files_{depth}depth_{folders}folders_{target_type}_sample{sample_size}"
+            f"{files}files_{depth}depth_{folders}folders_{target_type}"
         )
         if pattern != "N/A":
             name += f"_{pattern}"
@@ -55,7 +60,6 @@ class InfoConfigurator(ListingConfigurator):
         extra_values,
     ):
         target_type = extra_values[0]
-        sample_size = extra_values[1]
         return self.param_class(
             name=name,
             bucket_name=bucket_name,
@@ -68,7 +72,6 @@ class InfoConfigurator(ListingConfigurator):
             folders=folders,
             pattern=pattern,
             target_type=target_type,
-            sample_size=sample_size,
         )
 
 
