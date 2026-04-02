@@ -116,22 +116,27 @@ To reproduce using more combinations, please see the `gcsfs/perf/microbenchmarks
      - Processes
      - Rapid Bucket
      - Standard Bucket
+     - Speedup Factor
    * - 1 MB
      - Single Process
      - 469.09
      - 37.76
+     - ~12x
    * - 16 MB
      - Single Process
      - 628.59
      - 64.50
+     - ~9x
    * - 1 MB
      - 48 Processes
      - 16932
      - 2202
+     - ~7x
    * - 16 MB
      - 48 Processes
      - 19213.27
      - 4010.50
+     - ~4x
 
 .. list-table:: **Random Reads Throughput (MB/s)**
    :header-rows: 1
@@ -140,39 +145,46 @@ To reproduce using more combinations, please see the `gcsfs/perf/microbenchmarks
      - Processes
      - Rapid Bucket
      - Standard Bucket
+     - Speedup Factor
    * - 64 KB
      - Single Process
      - 39
      - 0.77
+     - ~50x
    * - 16 MB
      - Single Process
      - 602.12
      - 66.92
+     - ~9x
    * - 64 KB
      - 48 Processes
      - 2081
      - 51
+     - ~40x
    * - 16 MB
      - 48 Processes
      - 21448
      - 4504
+     - ~4x
 
 .. list-table:: **Writes Throughput (MB/s)**
-   :widths: 20 20 30 30
    :header-rows: 1
 
    * - IO Size
      - Processes
      - Rapid Bucket
      - Standard Bucket
+     - Speedup Factor
    * - 16 MB
      - Single Process
      - 326
      - 100
+     - ~3x
    * - 16 MB
      - 48 Processes
      - 13418
      - 4722
+     - ~2x
 
 Multiprocessing and gRPC
 ----------------------------------------------
