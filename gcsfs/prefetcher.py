@@ -157,7 +157,10 @@ class PrefetchProducer:
             int: The maximum number of bytes to prefetch ahead.
         """
         if self._user_max_prefetch_size is not None:
-            return self._user_max_prefetch_size
+            return min(
+                self._user_max_prefetch_size,
+                max(2 * self.get_io_size(), self.MIN_PREFETCH_SIZE),
+            )
         return max(2 * self.get_io_size(), self.MIN_PREFETCH_SIZE)
 
     def start(self):
@@ -262,12 +265,6 @@ class PrefetchProducer:
                     prefetch_space_available = prefetch_size - (
                         self.current_offset - user_offset
                     )
-
-                    if (
-                        space_remaining >= io_size
-                        and prefetch_space_available < io_size
-                    ):
-                        break
 
                     if prefetch_size >= self.MIN_CHUNK_SIZE:
                         if prefetch_space_available >= self.MIN_CHUNK_SIZE:

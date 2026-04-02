@@ -404,26 +404,6 @@ def test_fetch_stopped_during_execution():
     bp.close()
 
 
-def test_producer_space_remaining_break_exact():
-    fetcher = MockFetcher(b"X" * 1000)
-    bp = BackgroundPrefetcher(
-        fetcher=fetcher, size=1000, concurrency=4, max_prefetch_size=150
-    )
-    bp.read_tracker.add(100)
-
-    async def trigger_loop():
-        bp.producer.current_offset = 100
-        bp.consumer.offset = 0
-        bp.consumer.sequential_streak = 5
-
-        bp.wakeup_event.set()
-        await asyncio.sleep(0.05)
-
-    fsspec.asyn.sync(bp.loop, trigger_loop)
-    assert fetcher.call_count == 0
-    bp.close()
-
-
 def test_async_fetch_not_block_break():
     bp = BackgroundPrefetcher(fetcher=MockFetcher(b""), size=100, concurrency=4)
 

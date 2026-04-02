@@ -30,7 +30,7 @@ from .checkers import get_consistency_checker
 from .credentials import GoogleCredentials
 from .inventory_report import InventoryReport
 from .retry import errs, retry_request, validate_response
-from .zb_hns_utils import DEFAULT_CONCURRENCY
+from .zb_hns_utils import DEFAULT_CONCURRENCY, MAX_PREFETCH_SIZE
 
 logger = logging.getLogger("gcsfs")
 
@@ -2095,7 +2095,7 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
         self.concurrency = kwargs.get("concurrency", DEFAULT_CONCURRENCY)
 
         if "r" in mode and use_prefetch_reader:
-            max_prefetch_size = kwargs.get("max_prefetch_size", None)
+            max_prefetch_size = kwargs.get("max_prefetch_size", MAX_PREFETCH_SIZE)
             from .prefetcher import BackgroundPrefetcher
 
             self._prefetch_engine = BackgroundPrefetcher(
