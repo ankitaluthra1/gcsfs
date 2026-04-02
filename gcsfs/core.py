@@ -27,6 +27,7 @@ from fsspec.utils import setup_logging, stringify_path
 
 from . import __version__ as version
 from .checkers import get_consistency_checker
+from .concurrency import parallel_tasks_first_completed
 from .credentials import GoogleCredentials
 from .inventory_report import InventoryReport
 from .retry import errs, retry_request, validate_response
@@ -1048,11 +1049,14 @@ class GCSFileSystem(asyn.AsyncFileSystem):
         """File information about this path."""
         path = self._strip_protocol(path).rstrip("/")
         if "/" not in path:
-            get_task = asyncio.create_task(
-                self._call("GET", f"b/{path}", json_out=True)
-            )
-            ls_task = asyncio.create_task(self._ls(path, max_results=1))
-            try:
+            async with parallel_tasks_first_completed(
+                [
+                    self._call("GET", f"b/{path}", json_out=True),
+                    self._ls(path, max_results=1),
+                ]
+            ) as (tasks, done, pending):
+                get_task, ls_task = tasks
+
                 try:
                     out = await get_task
                     out.update(size=0, type="directory")
@@ -1061,11 +1065,6 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                     if await ls_task:
                         return {"name": path, "size": 0, "type": "directory"}
                     raise FileNotFoundError(path)
-            finally:
-                if not get_task.done():
-                    get_task.cancel()
-                if not ls_task.done():
-                    ls_task.cancel()
 
         # Check directory cache for parent dir
         parent_path = self._parent(path)
