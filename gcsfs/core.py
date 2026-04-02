@@ -1235,6 +1235,9 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                 path, start=start, end=end, concurrency=concurrency, **kwargs
             )
 
+        # While we could just call _cat_file_concurrent(concurrency=1), we are choosing
+        # to keep it separate because concurrency code path is still in an experimental phase.
+        # Once concurrency code path is stabilized, we can remove this if-else condition.
         return await self._cat_file_sequential(path, start=start, end=end, **kwargs)
 
     async def _getxattr(self, path, attr):
@@ -2084,17 +2087,14 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
         use_prefetch_reader = kwargs.get(
             "use_experimental_adaptive_prefetching", False
         ) or os.environ.get(
-            "use_experimental_adaptive_prefetching", "false"
+            "USE_EXPERIMENTAL_ADAPTIVE_PREFETCHING", "false"
         ).lower() in (
             "true",
             "1",
-            "t",
-            "y",
-            "yes",
         )
         self.concurrency = kwargs.get("concurrency", DEFAULT_CONCURRENCY)
 
-        if use_prefetch_reader:
+        if "r" in mode and use_prefetch_reader:
             max_prefetch_size = kwargs.get("max_prefetch_size", None)
             from .prefetcher import BackgroundPrefetcher
 

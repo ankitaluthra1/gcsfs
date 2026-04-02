@@ -52,7 +52,9 @@ class RunningAverageTracker:
             value (int): The integer value to add to the history.
         """
         if value <= 0:
-            return
+            raise ValueError(
+                "Internal error, RunningAverageTracker tried inserting negative value"
+            )
         if len(self._history) == self._history.maxlen:
             self._sum -= self._history[0]
 
@@ -163,7 +165,7 @@ class PrefetchProducer:
 
         This clears any previous wakeup events and spawns the main loop task.
         """
-        logger.info("Starting PrefetchProducer loop.")
+        logger.debug("Starting PrefetchProducer loop.")
         self.is_stopped = False
         self.wakeup_event.clear()
         self._producer_task = asyncio.create_task(self._loop())
@@ -174,7 +176,7 @@ class PrefetchProducer:
         This method ensures the queue is flushed and waits for cancelled
         tasks to finish cleaning up.
         """
-        logger.info(
+        logger.debug(
             "Stopping PrefetchProducer. Active fetch tasks: %d", len(self._active_tasks)
         )
         self.is_stopped = True
@@ -223,7 +225,7 @@ class PrefetchProducer:
         Args:
             new_offset (int): The new byte position to start prefetching from.
         """
-        logger.info("Restarting PrefetchProducer at new offset: %d", new_offset)
+        logger.debug("Restarting PrefetchProducer at new offset: %d", new_offset)
         await self.stop()
         self.current_offset = new_offset
         self.start()
@@ -284,7 +286,7 @@ class PrefetchProducer:
                             self.concurrency,
                             max(
                                 1,
-                                actual_size * self.concurrency // (prefetch_size or 1),
+                                actual_size * self.concurrency // prefetch_size,
                             ),
                         )
 
@@ -358,7 +360,7 @@ class PrefetchConsumer:
         Args:
             new_offset (int): The byte position the consumer is jumping to.
         """
-        logger.info(
+        logger.debug(
             "Consumer executing hard seek to offset %d. Clearing internal buffer.",
             new_offset,
         )
@@ -495,7 +497,7 @@ class BackgroundPrefetcher:
         Raises:
             ValueError: If max_prefetch_size is provided but is not a positive integer.
         """
-        logger.info(
+        logger.debug(
             "Starting BackgroundPrefetcher. Size: %d, Concurrency: %d, Max Prefetch: %s",
             size,
             concurrency,
@@ -577,7 +579,7 @@ class BackgroundPrefetcher:
 
         if start != self.user_offset:
             if self.user_offset < start <= self.producer.current_offset:
-                logger.info(
+                logger.debug(
                     "Soft seek detected. Skipping ahead from %d to %d.",
                     self.user_offset,
                     start,
@@ -586,7 +588,7 @@ class BackgroundPrefetcher:
                 await self.consumer.skip(skip_amount)
                 self.user_offset = start
             else:
-                logger.info(
+                logger.debug(
                     "Hard seek detected. Moving user offset from %d to %d.",
                     self.user_offset,
                     start,
@@ -662,7 +664,7 @@ class BackgroundPrefetcher:
         This cancels all background network tasks and blocks until everything
         is completely cleaned up. It also clears the internal consumer buffer.
         """
-        logger.info("Closing BackgroundPrefetcher and cleaning up resources.")
+        logger.debug("Closing BackgroundPrefetcher and cleaning up resources.")
         if self.is_stopped:
             logger.debug(
                 "BackgroundPrefetcher is already stopped. Skipping close operation."
@@ -673,4 +675,4 @@ class BackgroundPrefetcher:
         with self._lock:
             fsspec.asyn.sync(self.loop, self.producer.stop)
             self.consumer.clear_buffer()
-        logger.info("BackgroundPrefetcher closed successfully.")
+        logger.debug("BackgroundPrefetcher closed successfully.")
