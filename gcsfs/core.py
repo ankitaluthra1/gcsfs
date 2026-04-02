@@ -1090,17 +1090,6 @@ class GCSFileSystem(asyn.AsyncFileSystem):
         ) as (tasks, done, pending):
             exact_task, dir_task = tasks
 
-            if exact_task in done:
-                try:
-                    exact_res = exact_task.result()
-                    if not _is_directory_marker(exact_res):
-                        return exact_res
-                except FileNotFoundError:
-                    pass
-                if dir_task in done:
-                    return dir_task.result()
-                return await dir_task
-
             try:
                 exact_res = await exact_task
                 if not _is_directory_marker(exact_res):

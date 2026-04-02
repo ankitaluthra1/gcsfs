@@ -12,7 +12,9 @@ async def parallel_tasks_first_completed(coros):
     tasks = [asyncio.create_task(c) for c in coros]
     try:
         # Suspend until the first task finishes for maximum responsiveness
-        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        done, pending = await asyncio.wait(
+            set(tasks), return_when=asyncio.FIRST_COMPLETED
+        )
         yield tasks, done, pending
     finally:
         # Ensure 'losing' tasks are cancelled immediately
