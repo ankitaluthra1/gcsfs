@@ -159,14 +159,16 @@ def test_listing_configurator(mock_config_dependencies):
 
 def test_info_configurator(mock_config_dependencies):
     """Test that InfoConfigurator correctly builds benchmark parameters."""
-    common = {"bucket_types": ["regional"], "files": [100], "folders": [1]}
+    common = {"bucket_types": ["regional"]}
     scenario = {
         "name": "info_test",
         "processes": [1],
         "threads": [1],
         "depth": 0,
         "pattern": "info",
-        "target_types": ["file"],
+        "target_type": "file",
+        "files": [100],
+        "folders": [1],
     }
 
     configurator = InfoConfigurator("dummy")
@@ -176,14 +178,13 @@ def test_info_configurator(mock_config_dependencies):
     case = cases[0]
     assert (
         case.name
-        == "info_test_1procs_1threads_100files_0depth_1folders_file_sample100_info_regional"
+        == "info_test_1procs_1threads_100files_0depth_1folders_file_info_regional"
     )
     assert case.files == 100
     assert case.depth == 0
     assert case.folders == 1
     assert case.pattern == "info"
     assert case.target_type == "file"
-    assert case.sample_size == 100
 
 
 def test_generate_cases_calls_load(mock_config_dependencies):
