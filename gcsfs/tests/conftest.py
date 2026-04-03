@@ -330,12 +330,13 @@ def _create_extended_gcsfs(gcs_factory, buckets_to_delete, populate_bucket, **kw
     extended_gcsfs = gcs_factory(**kwargs)
     # Only create/delete/populate the bucket if we are NOT using the real GCS endpoint.
     if not is_real_gcs:
-        try:
-            extended_gcsfs.rm(TEST_ZONAL_BUCKET, recursive=True)
-        except FileNotFoundError:
-            pass
-        extended_gcsfs.mkdir(TEST_ZONAL_BUCKET)
-        buckets_to_delete.add(TEST_ZONAL_BUCKET)
+        if not extended_gcsfs.exists(TEST_ZONAL_BUCKET):
+            extended_gcsfs.mkdir(TEST_ZONAL_BUCKET)
+            buckets_to_delete.add(TEST_ZONAL_BUCKET)
+
+        if not extended_gcsfs.exists(TEST_BUCKET):
+            extended_gcsfs.mkdir(TEST_BUCKET)
+            buckets_to_delete.add(TEST_BUCKET)
     try:
         if populate_bucket:
             # To avoid hitting object mutation limits, only pipe files if they
@@ -484,10 +485,8 @@ def pytest_ignore_collect(collection_path, config):
             "delete",
             "listing",
             "read",
-            "read_fixed_duration",
             "rename",
             "write",
-            "write_fixed_duration",
             "info",
         }
 

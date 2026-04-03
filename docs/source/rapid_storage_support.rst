@@ -99,80 +99,92 @@ The table below highlights how core filesystem and file-level operations change 
      - Closes streams but leaves the object unfinalized (appendable) by default. Use ``finalize_on_close=True`` when opening file or calling ``close()`` or use ``.commit()`` to finalize. Note that ``autocommit`` does not work for Rapid buckets.
    * - **mv**
      - Object-level copy-and-delete logic.
-     - Uses native, atomic ``rename_folder`` API for folders. All directory semantics described in the :doc:`HNS documentation <hns_buckets>` also apply For Rapid.
+     - Uses native, atomic ``rename_folder`` API for folders. All directory semantics described in the :doc:`HNS documentation <hns_buckets>` also apply for Rapid.
 
 Performance Benchmarks
 ----------------------
 
 Rapid Storage via gRPC significantly improves read and write performance compared to standard HTTP regional buckets.
-Here are the microbenchmarks
-Rapid drastically outperform standard buckets across different read patterns, including both sequential and random reads, as well as for writes.
+Here are the microbenchmarks.
+Rapid drastically outperforms standard buckets across different read patterns, including both sequential and random reads, as well as for writes.
 To reproduce using more combinations, please see the `gcsfs/perf/microbenchmarks <https://github.com/fsspec/gcsfs/tree/main/gcsfs/tests/perf/microbenchmarks>`_ directory.
 
-.. list-table:: **Sequential Reads**
+.. list-table:: **Sequential Reads Throughput (MB/s)**
    :header-rows: 1
 
    * - IO Size
      - Processes
-     - Rapid (MB/s)
-     - Standard (MB/s)
+     - Rapid Bucket
+     - Standard Bucket
+     - Speedup Factor
    * - 1 MB
      - Single Process
      - 469.09
      - 37.76
+     - ~12x
    * - 16 MB
      - Single Process
      - 628.59
      - 64.50
+     - ~9x
    * - 1 MB
      - 48 Processes
      - 16932
      - 2202
+     - ~7x
    * - 16 MB
      - 48 Processes
      - 19213.27
      - 4010.50
+     - ~4x
 
-.. list-table:: **Random Reads**
+.. list-table:: **Random Reads Throughput (MB/s)**
    :header-rows: 1
 
    * - IO Size
      - Processes
-     - Rapid Throughput (MB/s)
-     - Standard (MB/s)
+     - Rapid Bucket
+     - Standard Bucket
+     - Speedup Factor
    * - 64 KB
      - Single Process
      - 39
      - 0.77
+     - ~50x
    * - 16 MB
      - Single Process
      - 602.12
      - 66.92
+     - ~9x
    * - 64 KB
      - 48 Processes
      - 2081
      - 51
+     - ~40x
    * - 16 MB
      - 48 Processes
      - 21448
      - 4504
+     - ~4x
 
-.. list-table:: **Writes**
-   :widths: 20 20 30 30
+.. list-table:: **Writes Throughput (MB/s)**
    :header-rows: 1
 
    * - IO Size
      - Processes
-     - Zonal Bucket
-     - Regional Bucket
+     - Rapid Bucket
+     - Standard Bucket
+     - Speedup Factor
    * - 16 MB
      - Single Process
      - 326
      - 100
+     - ~3x
    * - 16 MB
      - 48 Processes
      - 13418
      - 4722
+     - ~2x
 
 Multiprocessing and gRPC
 ----------------------------------------------
@@ -182,11 +194,11 @@ Because `gcsfs` relies on gRPC to interact with Rapid storage, developers must b
 However, gRPC Python wraps gRPC core, which uses internal multithreading for performance, and hence doesn't support `fork()`.
 Using `fork()` for multi-processing can lead to hangs or segmentation faults when child processes attempt to use the network layer
 where the application creates gRPC Python objects (e.g., client channel)before invoking `fork()`. However, if the application only
-instantiate gRPC Python objects after calling `fork()`, then `fork()` will work normally, since there is no C extension binding at this point.
+instantiates gRPC Python objects after calling `fork()`, then `fork()` will work normally, since there is no C extension binding at this point.
 
 **Alternative: Use `forkserver` or `spawn` instead of `fork`**
 
-To resolve `fork` issue, you can use `forkserver` or `spawn` instead of `fork` where the child process will create their own grpc connection.
+To resolve the `fork` issue, you can use `forkserver` or `spawn` instead of `fork` where the child processes will create their own gRPC connections.
 You can configure Python's `multiprocessing` module to override the start method as shown in the snippet below.
 For example while using data loaders in frameworks like PyTorch
 (e.g., `torch.utils.data.DataLoader` with `num_workers > 0`) alongside `gcsfs` with Rapid storage:
@@ -198,7 +210,7 @@ For example while using data loaders in frameworks like PyTorch
     # This must be done before other imports or initialization
     try:
       torch.multiprocessing.set_start_method('forkserver', force=True)
-      # or use torch.multiprocessing.set_start_method('forkserver', force=True)
+      # or use torch.multiprocessing.set_start_method('spawn', force=True)
     except RuntimeError:
       pass # Context already set
 

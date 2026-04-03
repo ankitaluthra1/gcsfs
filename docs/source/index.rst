@@ -171,7 +171,7 @@ Async
 -----
 
 ``gcsfs`` is implemented using ``aiohttp``, and offers async functionality.
-A number of methods of ``GCSFileSystem`` are ``async``, for for each of these,
+A number of methods of ``GCSFileSystem`` are ``async``, and for each of these,
 there is also a synchronous version with the same name and lack of a "_"
 prefix.
 
@@ -195,10 +195,10 @@ from normal code. If you are *not*
 using async-style programming, you do not need to know about how this
 works, but you might find the implementation interesting.
 
-For every synchronous function there is asynchronous one prefixed by ``_``, but
+For every synchronous function there is an asynchronous one prefixed by ``_``, but
 the ``open`` operation does not support async operation. If you need it to open
-some file in async manner, it's better to asynchronously download it to
-temporary location and working with it from there.
+some file in an async manner, it's better to asynchronously download it to
+a temporary location and work with it from there.
 
 Proxy
 -----
@@ -239,6 +239,7 @@ Contents
    developer
    hns_buckets
    rapid_storage_support
+   retries
    fuse
    changelog
    code-of-conduct
