@@ -2352,6 +2352,8 @@ def test_gcsfile_not_satisfiable_range(gcs):
     with gcs.open(fn, "rb", use_experimental_adaptive_prefetching=True) as f:
         res = f._fetch_range(100, 200)
         assert res == b""
+
+
 def test_tree(gcs):
     unique_id = uuid.uuid4().hex
     base_dir = f"{TEST_BUCKET}/test_tree_regional_{unique_id}"
