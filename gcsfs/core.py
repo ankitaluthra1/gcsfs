@@ -1088,15 +1088,15 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                 self._get_directory_info(path, bucket, key, generation),
             ]
         ) as (tasks, done, pending):
-            exact_task, dir_task = tasks
+            get_object_task, get_directory_info_task = tasks
 
             try:
-                exact_res = await exact_task
+                exact_res = await get_object_task
                 if not _is_directory_marker(exact_res):
                     return exact_res
             except FileNotFoundError:
                 pass
-            return await dir_task
+            return await get_directory_info_task
 
     async def _get_directory_info(self, path, bucket, key, generation):
         """
