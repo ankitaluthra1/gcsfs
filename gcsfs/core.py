@@ -1091,9 +1091,9 @@ class GCSFileSystem(asyn.AsyncFileSystem):
             get_object_task, get_directory_info_task = tasks
 
             try:
-                exact_res = await get_object_task
-                if not _is_directory_marker(exact_res):
-                    return exact_res
+                get_object_res = await get_object_task
+                if not _is_directory_marker(get_object_res):
+                    return get_object_res
             except FileNotFoundError:
                 pass
             return await get_directory_info_task
