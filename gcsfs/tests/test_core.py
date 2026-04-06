@@ -2108,10 +2108,9 @@ def test_sign(gcs, monkeypatch):
     assert response.text == "This is a test string"
 
 
-@pytest.mark.xfail(reason="emulator does not support condition")
 def test_write_x_mpu(gcs):
-    # if not gcs.on_google:
-    #     pytest.skip("emulator does not support condition")
+    if not gcs.on_google:
+        pytest.skip("emulator does not support condition")
     fn = TEST_BUCKET + "/test.file"
     with gcs.open(fn, mode="xb", block_size=5 * 2**20) as f:
         assert f.mode == "xb"
