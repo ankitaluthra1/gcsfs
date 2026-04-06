@@ -2177,7 +2177,6 @@ def test_mv_file_raises_error_for_specific_generation(gcs):
         gcs.version_aware = original_version_aware
 
 
-
 def test_tree(gcs):
     unique_id = uuid.uuid4().hex
     base_dir = f"{TEST_BUCKET}/test_tree_regional_{unique_id}"
@@ -2369,6 +2368,7 @@ def test_walk(gcs):
         assert set(d_list) == exp_dirs
         assert set(f_list) == exp_files
 
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "object_behavior, dir_behavior, expected",
@@ -2448,12 +2448,8 @@ async def test_info_parallel(gcs, object_behavior, dir_behavior, expected):
             for k, v in expected["return"].items():
                 assert res[k] == v
 
-
             assert mock_get_object.call_count == 1
             assert mock_get_dir.call_count == 1
-
-
-
 
 
 @pytest.mark.asyncio
@@ -2485,4 +2481,3 @@ async def test_info_parallel_dir_first(gcs):
 
         assert mock_get_object.call_count == 1
         assert mock_get_dir.call_count == 1
-
