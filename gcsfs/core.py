@@ -2063,6 +2063,7 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
         if not key:
             raise OSError("Attempt to open a bucket")
         self.generation = _coalesce_generation(generation, path_generation)
+        self.concurrency = kwargs.get("concurrency", DEFAULT_CONCURRENCY)
         super().__init__(
             gcsfs,
             path,
@@ -2093,7 +2094,6 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
             "true",
             "1",
         )
-        self.concurrency = kwargs.get("concurrency", DEFAULT_CONCURRENCY)
 
         if "r" in mode and use_prefetch_reader:
             max_prefetch_size = kwargs.get("max_prefetch_size", MAX_PREFETCH_SIZE)
@@ -2290,9 +2290,9 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
             if not both None, fetch only given range
         """
         try:
-            if self._prefetch_engine:
+            if hasattr(self, "_prefetch_engine") and self._prefetch_engine:
                 return self._prefetch_engine._fetch(start=start, end=end)
-            return self.gcsfs.cat_file(
+            return self.fs.cat_file(
                 self.path, start=start, end=end, concurrency=self.concurrency
             )
         except RuntimeError as e:

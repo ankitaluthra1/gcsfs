@@ -467,7 +467,7 @@ class PrefetchConsumer:
         if len(chunks) == 1:
             return chunks[0]
 
-        return b"".join(chunks)
+        return await asyncio.to_thread(b"".join, chunks)
 
     async def skip(self, size: int) -> None:
         """Advances the consumer offset without allocating memory."""
