@@ -7,24 +7,20 @@ common:
 scenarios:
   - name: "info_file"
     pattern: "info"
-    depth: 1
     target_type: "file"
     files: [10000]
     folders: [256]
 
   - name: "info_folder"
     pattern: "info"
-    depth: 1
     target_type: "folder"
     files: [65536] # list_objects performance can be measured for standard buckets with high number of files
     folders: [256]
 
   - name: "info_bucket"
     pattern: "info"
-    depth: 1
     target_type: "bucket"
-    files: [1]
-    folders: [1]
+
 
   - name: "info_deep_file"
     pattern: "info"
@@ -42,7 +38,6 @@ scenarios:
 
   - name: "info_multi_process_file"
     pattern: "info"
-    depth: 1
     target_type: "file"
     files: [10000]
     folders: [256]
@@ -50,7 +45,6 @@ scenarios:
 
   - name: "info_multi_process_folder"
     pattern: "info"
-    depth: 1
     target_type: "folder"
     files: [65536]
     folders: [256]
