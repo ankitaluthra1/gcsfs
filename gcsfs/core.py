@@ -27,6 +27,7 @@ from fsspec.utils import setup_logging, stringify_path
 
 from . import __version__ as version
 from .checkers import get_consistency_checker
+from .concurrency import parallel_tasks_first_completed
 from .credentials import GoogleCredentials
 from .inventory_report import InventoryReport
 from .retry import errs, retry_request, validate_response
@@ -1080,15 +1081,22 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                 "storageClass": "DIRECTORY",
                 "type": "directory",
             }
-        # Check exact file path
-        try:
-            exact = await self._get_object(path)
-            # this condition finds a "placeholder" - still need to check if it's a directory
-            if not _is_directory_marker(exact):
-                return exact
-        except FileNotFoundError:
-            pass
-        return await self._get_directory_info(path, bucket, key, generation)
+
+        async with parallel_tasks_first_completed(
+            [
+                self._get_object(path),
+                self._get_directory_info(path, bucket, key, generation),
+            ]
+        ) as (tasks, done, pending):
+            get_object_task, get_directory_info_task = tasks
+
+            try:
+                get_object_res = await get_object_task
+                if not _is_directory_marker(get_object_res):
+                    return get_object_res
+            except FileNotFoundError:
+                pass
+            return await get_directory_info_task
 
     async def _get_directory_info(self, path, bucket, key, generation):
         """

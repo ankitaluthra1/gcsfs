@@ -2367,3 +2367,117 @@ def test_walk(gcs):
         exp_dirs, exp_files = expected_structure[root]
         assert set(d_list) == exp_dirs
         assert set(f_list) == exp_files
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "object_behavior, dir_behavior, expected",
+    [
+        (
+            {"return": {"name": TEST_BUCKET + "/file", "type": "file", "size": 100}},
+            {"exception": FileNotFoundError},
+            {"return": {"type": "file"}},
+        ),
+        (
+            {"exception": FileNotFoundError},
+            {"return": {"name": TEST_BUCKET + "/file", "type": "directory", "size": 0}},
+            {"return": {"type": "directory"}},
+        ),
+        (
+            {
+                "return": {
+                    "name": TEST_BUCKET + "/file/",
+                    "type": "directory",
+                    "size": 0,
+                }
+            },
+            {
+                "return": {
+                    "name": TEST_BUCKET + "/file",
+                    "type": "directory",
+                    "size": 0,
+                    "extra": "info",
+                }
+            },
+            {"return": {"type": "directory", "extra": "info"}},
+        ),
+        (
+            {"exception": Exception("Generic error")},
+            {"exception": FileNotFoundError},
+            {"exception": Exception, "match": "Generic error"},
+        ),
+        (
+            {"exception": FileNotFoundError},
+            {"exception": Exception("Directory error")},
+            {"exception": Exception, "match": "Directory error"},
+        ),
+        (
+            {"exception": FileNotFoundError},
+            {"exception": FileNotFoundError},
+            {"exception": FileNotFoundError},
+        ),
+    ],
+)
+async def test_info_parallel(gcs, object_behavior, dir_behavior, expected):
+    path = TEST_BUCKET + "/file"
+
+    with (
+        mock.patch.object(
+            gcs, "_get_object", new_callable=mock.AsyncMock
+        ) as mock_get_object,
+        mock.patch.object(
+            gcs, "_get_directory_info", new_callable=mock.AsyncMock
+        ) as mock_get_dir,
+    ):
+
+        if "return" in object_behavior:
+            mock_get_object.return_value = object_behavior["return"]
+        elif "exception" in object_behavior:
+            mock_get_object.side_effect = object_behavior["exception"]
+
+        if "return" in dir_behavior:
+            mock_get_dir.return_value = dir_behavior["return"]
+        elif "exception" in dir_behavior:
+            mock_get_dir.side_effect = dir_behavior["exception"]
+
+        if "exception" in expected:
+            with pytest.raises(expected["exception"], match=expected.get("match")):
+                await gcs._info(path)
+        else:
+            res = await gcs._info(path)
+            for k, v in expected["return"].items():
+                assert res[k] == v
+
+            assert mock_get_object.call_count == 1
+            assert mock_get_dir.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_info_parallel_dir_first(gcs):
+    import asyncio
+
+    path = TEST_BUCKET + "/dir"
+
+    with (
+        mock.patch.object(
+            gcs, "_get_object", new_callable=mock.AsyncMock
+        ) as mock_get_object,
+        mock.patch.object(
+            gcs, "_get_directory_info", new_callable=mock.AsyncMock
+        ) as mock_get_dir,
+    ):
+
+        # Make _get_object slower than _get_directory_info
+        async def slow_get_object(*args, **kwargs):
+            await asyncio.sleep(0.1)
+            return {"name": path, "type": "file", "size": 100}
+
+        mock_get_object.side_effect = slow_get_object
+        # Directory check finishes immediately and succeeds
+        mock_get_dir.return_value = {"name": path, "type": "directory", "size": 0}
+
+        res = await gcs._info(path)
+        assert res["type"] == "file"
+
+        assert mock_get_object.call_count == 1
+        assert mock_get_dir.call_count == 1
