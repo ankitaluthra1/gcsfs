@@ -27,6 +27,7 @@ from fsspec.utils import setup_logging, stringify_path
 
 from . import __version__ as version
 from .checkers import get_consistency_checker
+from .concurrency import parallel_tasks_first_completed
 from .credentials import GoogleCredentials
 from .inventory_report import InventoryReport
 from .retry import errs, retry_request, validate_response
@@ -374,7 +375,7 @@ class GCSFileSystem(asyn.AsyncFileSystem):
 
     # Clean up the aiohttp session
     #
-    # This can run from the main thread if invoked via the weakref callbcak.
+    # This can run from the main thread if invoked via the weakref callback.
     # This can happen even if the `loop` parameter belongs to another thread
     # (e.g. the fsspec IO worker). The control flow here is intended to attempt
     # in-thread asynchronous cleanup first, then fallback to synchronous
@@ -1080,15 +1081,22 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                 "storageClass": "DIRECTORY",
                 "type": "directory",
             }
-        # Check exact file path
-        try:
-            exact = await self._get_object(path)
-            # this condition finds a "placeholder" - still need to check if it's a directory
-            if not _is_directory_marker(exact):
-                return exact
-        except FileNotFoundError:
-            pass
-        return await self._get_directory_info(path, bucket, key, generation)
+
+        async with parallel_tasks_first_completed(
+            [
+                self._get_object(path),
+                self._get_directory_info(path, bucket, key, generation),
+            ]
+        ) as (tasks, done, pending):
+            get_object_task, get_directory_info_task = tasks
+
+            try:
+                get_object_res = await get_object_task
+                if not _is_directory_marker(get_object_res):
+                    return get_object_res
+            except FileNotFoundError:
+                pass
+            return await get_directory_info_task
 
     async def _get_directory_info(self, path, bucket, key, generation):
         """
@@ -1346,7 +1354,7 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                 await self._mv_file_cache_update(path1, path2, out)
                 return
             except Exception as e:
-                # TODO: Fallback is added to make sure there is smooth tranistion, it can be removed
+                # TODO: Fallback is added to make sure there is smooth transition, it can be removed
                 # once we have metrics proving that moveTo API is working properly for all bucket types.
                 logger.warning(
                     f"Failed to move file using moveTo API: {e}. Falling back to copy/delete."
@@ -1445,6 +1453,7 @@ class GCSFileSystem(asyn.AsyncFileSystem):
 
     @property
     def on_google(self):
+        # match "torage" to handle both "storage" and "Storage"
         return f"torage.{_gcp_universe_domain()}" in self._location
 
     async def _delete_files(self, files, batchsize):
@@ -1859,7 +1868,7 @@ class GCSFileSystem(asyn.AsyncFileSystem):
 
         GCS allows object generation (object version) to be specified in either
         the URL fragment or the `generation` query parameter. When provided,
-        the fragment will take priority over the `generation` query paramenter.
+        the fragment will take priority over the `generation` query parameter.
 
         Returns
         -------

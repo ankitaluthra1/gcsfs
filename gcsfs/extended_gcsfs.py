@@ -963,6 +963,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             and not isinstance(ex, (FileNotFoundError, api_exceptions.NotFound))
             and "No such object" not in str(ex)
         ]
+
         if errors:
             raise errors[0]
 
