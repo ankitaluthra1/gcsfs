@@ -6,13 +6,22 @@ class InfoConfigurator(ListingConfigurator):
     param_class = InfoBenchmarkParameters
 
     def _get_folders_list(self, scenario, common_config):
-        return common_config.get("folders", [1])
+        return scenario.get("folders", [1])
 
     def _get_files_list(self, scenario, common_config):
-        return common_config.get("files", [1])
+        return scenario.get("files", [1])
 
     def _get_extra_iterables(self, scenario, common_config):
-        return [scenario.get("target_types", ["bucket", "folder", "file"])]
+        target_types = scenario.get("target_type")
+        if target_types:
+            if isinstance(target_types, str):
+                target_types = [target_types]
+        else:
+            target_types = scenario.get("target_types", ["bucket", "folder", "file"])
+
+        return [
+            target_types,
+        ]
 
     def _create_case_name(
         self,

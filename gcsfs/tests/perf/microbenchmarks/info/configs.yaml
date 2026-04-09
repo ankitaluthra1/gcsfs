@@ -3,26 +3,66 @@ common:
     - "regional"
     - "zonal"
     - "hns"
-  files:
-    - 100
-  folders:
-    - 100
 
 scenarios:
-  - name: "info"
+  - name: "info_file"
     pattern: "info"
-    depth: 1
+    target_type: "file"
+    files: [10000]
+    folders: [256]
 
-  - name: "info_deep"
+  - name: "info_folder"
+    pattern: "info"
+    target_type: "folder"
+    files: [65536] # list_objects performance can be measured for standard buckets with high number of files
+    folders: [256]
+
+  - name: "info_bucket"
+    pattern: "info"
+    target_type: "bucket"
+
+
+  - name: "info_deep_file"
     pattern: "info"
     depth: 10
+    target_type: "file"
+    files: [10000]
+    folders: [256]
 
-  - name: "info_multi_process"
+  - name: "info_deep_folder"
     pattern: "info"
-    depth: 1
+    depth: 10
+    target_type: "folder"
+    files: [65536]
+    folders: [256]
+
+  - name: "info_multi_process_file"
+    pattern: "info"
+    target_type: "file"
+    files: [10000]
+    folders: [256]
     processes: [4, 8]
 
-  - name: "info_multi_process_deep"
+  - name: "info_multi_process_folder"
+    pattern: "info"
+    target_type: "folder"
+    files: [65536]
+    folders: [256]
+    processes: [4, 8]
+
+
+  - name: "info_multi_process_deep_file"
     pattern: "info"
     depth: 10
+    target_type: "file"
+    files: [10000]
+    folders: [256]
+    processes: [4, 8]
+
+  - name: "info_multi_process_deep_folder"
+    pattern: "info"
+    depth: 10
+    target_type: "folder"
+    files: [65536]
+    folders: [256]
     processes: [4, 8]
