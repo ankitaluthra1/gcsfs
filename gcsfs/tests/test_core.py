@@ -884,7 +884,7 @@ def test_move_recursive_with_slash(gcs):
             mock_mv_file.assert_any_await(dir_from + "file2", dir_to + "/file2")
 
 
-def test_move_list(gcs):
+def test_move_list_to_dir(gcs):
     fn1 = TEST_BUCKET + "/test/accounts.1.json"
     fn2 = TEST_BUCKET + "/test/accounts.2.json"
 
@@ -907,6 +907,63 @@ def test_move_list(gcs):
             assert mock_mv_file.call_count == 2
             mock_mv_file.assert_any_await(fn1, TEST_BUCKET + "/test2/accounts.1.json")
             mock_mv_file.assert_any_await(fn2, TEST_BUCKET + "/test2/accounts.2.json")
+
+
+def test_move_list_to_list(gcs):
+    fn1 = TEST_BUCKET + "/test/accounts.1.json"
+    fn2 = TEST_BUCKET + "/test/accounts.2.json"
+
+    if gcs.on_google:
+        data1 = gcs.cat(fn1)
+        data2 = gcs.cat(fn2)
+
+        gcs.mv([fn1, fn2], [fn1 + "2", fn2 + "2"])
+
+        assert gcs.cat(fn1 + "2") == data1
+        assert gcs.cat(fn2 + "2") == data2
+        assert not gcs.exists(fn1)
+        assert not gcs.exists(fn2)
+    else:
+        with mock.patch.object(
+            gcs, "_mv_file", new_callable=mock.AsyncMock
+        ) as mock_mv_file:
+            gcs.mv([fn1, fn2], [fn1 + "2", fn2 + "2"])
+
+            assert mock_mv_file.call_count == 2
+            mock_mv_file.assert_any_await(fn1, fn1 + "2")
+            mock_mv_file.assert_any_await(fn2, fn2 + "2")
+
+
+def test_move_implicit_directories_ignore_filenotfound(gcs):
+    paths1 = [TEST_BUCKET + "/dir/", TEST_BUCKET + "/dir/file1"]
+    paths2 = [TEST_BUCKET + "/dest/", TEST_BUCKET + "/dest/file1"]
+
+    with mock.patch.object(
+        gcs, "_mv_file", new_callable=mock.AsyncMock
+    ) as mock_mv_file:
+        mock_mv_file.side_effect = [FileNotFoundError("dir not found"), None]
+        gcs.mv(paths1, paths2, recursive=True)
+        assert mock_mv_file.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_move_non_recursive_empty_after_filter(gcs):
+    path1 = TEST_BUCKET + "/dir"
+    path2 = TEST_BUCKET + "/dest"
+
+    with (
+        mock.patch.object(
+            gcs, "_expand_path", new_callable=mock.AsyncMock
+        ) as mock_expand,
+        mock.patch.object(gcs, "_isdir", new_callable=mock.AsyncMock) as mock_isdir,
+        mock.patch.object(gcs, "_mv_file", new_callable=mock.AsyncMock) as mock_mv_file,
+    ):
+        mock_expand.return_value = [TEST_BUCKET + "/dir/"]
+        mock_isdir.return_value = True
+
+        await gcs._mv(path1, path2, recursive=False)
+
+        mock_mv_file.assert_not_awaited()
 
 
 def test_mv_file(gcs):
