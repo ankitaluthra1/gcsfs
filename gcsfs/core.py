@@ -31,6 +31,7 @@ from .concurrency import parallel_tasks_first_completed
 from .credentials import GoogleCredentials
 from .inventory_report import InventoryReport
 from .retry import errs, retry_request, validate_response
+from .zb_hns_utils import DEFAULT_CONCURRENCY, MAX_PREFETCH_SIZE
 
 logger = logging.getLogger("gcsfs")
 
@@ -300,6 +301,7 @@ class GCSFileSystem(asyn.AsyncFileSystem):
     default_block_size = DEFAULT_BLOCK_SIZE
     protocol = "gs", "gcs"
     async_impl = True
+    MIN_CHUNK_SIZE_FOR_CONCURRENCY = 5 * 1024 * 1024
 
     def __init__(
         self,
@@ -1174,21 +1176,77 @@ class GCSFileSystem(asyn.AsyncFileSystem):
             f"&generation={generation}" if generation else "",
         )
 
-    async def _cat_file(self, path, start=None, end=None, **kwargs):
+    async def _cat_file_sequential(self, path, start=None, end=None, **kwargs):
         """Simple one-shot get of file data"""
         # if start and end are both provided and valid, but start >= end, return empty bytes
         # Otherwise, _process_limits would generate an invalid HTTP range (e.g. "bytes=5-4"
         # for start=5, end=5), causing the server to return the whole file instead of nothing.
         if start is not None and end is not None and start >= end >= 0:
             return b""
+
         u2 = self.url(path)
-        # 'if start or end' fails when start=0 or end=0 because 0 is Falsey.
         if start is not None or end is not None:
             head = {"Range": await self._process_limits(path, start, end)}
         else:
             head = {}
+
         headers, out = await self._call("GET", u2, headers=head)
         return out
+
+    async def _cat_file_concurrent(
+        self, path, start=None, end=None, concurrency=DEFAULT_CONCURRENCY, **kwargs
+    ):
+        """Concurrent fetch of file data"""
+        if start is None:
+            start = 0
+        if end is None:
+            end = (await self._info(path))["size"]
+        if start >= end:
+            return b""
+
+        if concurrency <= 1 or end - start < self.MIN_CHUNK_SIZE_FOR_CONCURRENCY:
+            return await self._cat_file_sequential(path, start=start, end=end, **kwargs)
+
+        total_size = end - start
+        part_size = total_size // concurrency
+        tasks = []
+
+        for i in range(concurrency):
+            offset = start + (i * part_size)
+            actual_size = (
+                part_size if i < concurrency - 1 else total_size - (i * part_size)
+            )
+            tasks.append(
+                asyncio.create_task(
+                    self._cat_file_sequential(
+                        path, start=offset, end=offset + actual_size, **kwargs
+                    )
+                )
+            )
+
+        try:
+            results = await asyncio.gather(*tasks)
+            return b"".join(results)
+        except BaseException as e:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise e
+
+    async def _cat_file(
+        self, path, start=None, end=None, concurrency=DEFAULT_CONCURRENCY, **kwargs
+    ):
+        """Simple one-shot, or concurrent get of file data"""
+        if concurrency > 1:
+            return await self._cat_file_concurrent(
+                path, start=start, end=end, concurrency=concurrency, **kwargs
+            )
+
+        # While we could just call _cat_file_concurrent(concurrency=1), we are choosing
+        # to keep it separate because concurrency code path is still in an experimental phase.
+        # Once concurrency code path is stabilized, we can remove this if-else condition.
+        return await self._cat_file_sequential(path, start=start, end=end, **kwargs)
 
     async def _getxattr(self, path, attr):
         """Get user-defined metadata attribute"""
@@ -2013,6 +2071,7 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
         if not key:
             raise OSError("Attempt to open a bucket")
         self.generation = _coalesce_generation(generation, path_generation)
+        self.concurrency = kwargs.get("concurrency", DEFAULT_CONCURRENCY)
         super().__init__(
             gcsfs,
             path,
@@ -2029,6 +2088,34 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
         self.acl = acl
         self.consistency = consistency
         self.checker = get_consistency_checker(consistency)
+
+        # Ideally, all of these fields should be part of `cache_options`. Because current
+        # `fsspec` caches do not accept arbitrary `*args` and `**kwargs`, passing them
+        # there currently causes instantiation errors. We are holding off on introducing
+        # them as explicit keyword arguments to ensure existing user workloads are not
+        # disrupted. This will be refactored once the upstream `fsspec` changes are merged.
+        use_prefetch_reader = kwargs.get(
+            "use_experimental_adaptive_prefetching", False
+        ) or os.environ.get(
+            "USE_EXPERIMENTAL_ADAPTIVE_PREFETCHING", "false"
+        ).lower() in (
+            "true",
+            "1",
+        )
+
+        if "r" in mode and use_prefetch_reader:
+            max_prefetch_size = kwargs.get("max_prefetch_size", MAX_PREFETCH_SIZE)
+            from .prefetcher import BackgroundPrefetcher
+
+            self._prefetch_engine = BackgroundPrefetcher(
+                self._async_fetch_range,
+                self.size,
+                max_prefetch_size=max_prefetch_size,
+                concurrency=self.concurrency,
+            )
+        else:
+            self._prefetch_engine = None
+
         # _supports_append is an internal argument not meant to be used directly.
         # If True, allows opening file in append mode. This is generally not supported
         # by GCS, but may be supported by subclasses (e.g. ZonalFile). This flag should
@@ -2211,11 +2298,29 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
             if not both None, fetch only given range
         """
         try:
-            return self.gcsfs.cat_file(self.path, start=start, end=end)
+            if hasattr(self, "_prefetch_engine") and self._prefetch_engine:
+                return self._prefetch_engine._fetch(start=start, end=end)
+            return self.fs.cat_file(
+                self.path, start=start, end=end, concurrency=self.concurrency
+            )
         except RuntimeError as e:
             if "not satisfiable" in str(e):
                 return b""
             raise
+
+    async def _async_fetch_range(self, start_offset, total_size, split_factor=1):
+        """Async fetcher mapped to the Prefetcher engine for regional buckets."""
+        return await self.gcsfs._cat_file_concurrent(
+            self.path,
+            start=start_offset,
+            end=start_offset + total_size,
+            concurrency=split_factor,
+        )
+
+    def close(self):
+        super().close()
+        if hasattr(self, "_prefetch_engine") and self._prefetch_engine:
+            self._prefetch_engine.close()
 
 
 def _convert_fixed_key_metadata(metadata, *, from_google=False):
