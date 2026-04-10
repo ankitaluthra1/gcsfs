@@ -787,69 +787,148 @@ def test_copy_errors(gcs):
         ]
 
 
+def test_move_src_dst_equal(gcs):
+    path = TEST_BUCKET + "/file1"
+    with mock.patch.object(
+        gcs, "_mv_file", new_callable=mock.AsyncMock
+    ) as mock_mv_file:
+        gcs.mv(path, path)
+        mock_mv_file.assert_not_awaited()
+
+
 def test_move(gcs):
-    if not gcs.on_google:
-        pytest.skip("emulator does not support moveTo")
     fn = TEST_BUCKET + "/test/accounts.1.json"
-    data = gcs.cat(fn)
-    gcs.mv(fn, fn + "2")
-    assert gcs.cat(fn + "2") == data
-    assert not gcs.exists(fn)
+
+    if gcs.on_google:
+        data = gcs.cat(fn)
+        gcs.mv(fn, fn + "2")
+        assert gcs.cat(fn + "2") == data
+        assert not gcs.exists(fn)
+    else:
+        with (
+            mock.patch.object(
+                gcs, "_expand_path", new_callable=mock.AsyncMock
+            ) as mock_expand,
+            mock.patch.object(
+                gcs, "_mv_file", new_callable=mock.AsyncMock
+            ) as mock_mv_file,
+        ):
+            mock_expand.return_value = [fn]
+            gcs.mv(fn, fn + "2")
+            mock_mv_file.assert_awaited_once_with(fn, fn + "2")
 
 
 def test_move_recursive_no_slash(gcs):
-    if not gcs.on_google:
-        pytest.skip("emulator does not support moveTo")
     # See issue #489
     dir_from = TEST_BUCKET + "/nested"
     dir_to = TEST_BUCKET + "/new_name"
 
-    gcs.mv(dir_from, dir_to, recursive=True)
-    assert not gcs.exists(dir_from)
-    assert gcs.ls(dir_to) == [dir_to + "/file1", dir_to + "/file2", dir_to + "/nested2"]
+    if gcs.on_google:
+        gcs.mv(dir_from, dir_to, recursive=True)
+        assert not gcs.exists(dir_from)
+        assert gcs.ls(dir_to) == [
+            dir_to + "/file1",
+            dir_to + "/file2",
+            dir_to + "/nested2",
+        ]
+    else:
+        with (
+            mock.patch.object(
+                gcs, "_expand_path", new_callable=mock.AsyncMock
+            ) as mock_expand,
+            mock.patch.object(gcs, "_isdir", new_callable=mock.AsyncMock) as mock_isdir,
+            mock.patch.object(
+                gcs, "_mv_file", new_callable=mock.AsyncMock
+            ) as mock_mv_file,
+        ):
+            mock_expand.return_value = [dir_from + "/file1", dir_from + "/file2"]
+            mock_isdir.return_value = False
+
+            gcs.mv(dir_from, dir_to, recursive=True)
+
+            assert mock_mv_file.call_count == 2
+            mock_mv_file.assert_any_await(dir_from + "/file1", dir_to + "/file1")
+            mock_mv_file.assert_any_await(dir_from + "/file2", dir_to + "/file2")
 
 
 def test_move_recursive_with_slash(gcs):
-    if not gcs.on_google:
-        pytest.skip("emulator does not support moveTo")
     # See issue #489
     dir_from = TEST_BUCKET + "/nested/"
     dir_to = TEST_BUCKET + "/new_name_with_slash"
 
-    gcs.mv(dir_from, dir_to, recursive=True)
-    assert not gcs.exists(dir_from.rstrip("/"))
-    assert gcs.ls(dir_to) == [dir_to + "/file1", dir_to + "/file2", dir_to + "/nested2"]
+    if gcs.on_google:
+        gcs.mv(dir_from, dir_to, recursive=True)
+        assert not gcs.exists(dir_from.rstrip("/"))
+        assert gcs.ls(dir_to) == [
+            dir_to + "/file1",
+            dir_to + "/file2",
+            dir_to + "/nested2",
+        ]
+    else:
+        with (
+            mock.patch.object(
+                gcs, "_expand_path", new_callable=mock.AsyncMock
+            ) as mock_expand,
+            mock.patch.object(gcs, "_isdir", new_callable=mock.AsyncMock) as mock_isdir,
+            mock.patch.object(
+                gcs, "_mv_file", new_callable=mock.AsyncMock
+            ) as mock_mv_file,
+        ):
+            mock_expand.return_value = [dir_from + "file1", dir_from + "file2"]
+            mock_isdir.return_value = False
+
+            gcs.mv(dir_from, dir_to, recursive=True)
+
+            assert mock_mv_file.call_count == 2
+            mock_mv_file.assert_any_await(dir_from + "file1", dir_to + "/file1")
+            mock_mv_file.assert_any_await(dir_from + "file2", dir_to + "/file2")
 
 
 def test_move_list(gcs):
-    if not gcs.on_google:
-        pytest.skip("emulator does not support moveTo")
     fn1 = TEST_BUCKET + "/test/accounts.1.json"
     fn2 = TEST_BUCKET + "/test/accounts.2.json"
-    data1 = gcs.cat(fn1)
-    data2 = gcs.cat(fn2)
 
-    gcs.mv([fn1, fn2], TEST_BUCKET + "/test2/")
+    if gcs.on_google:
+        data1 = gcs.cat(fn1)
+        data2 = gcs.cat(fn2)
 
-    assert gcs.cat(TEST_BUCKET + "/test2/accounts.1.json") == data1
-    assert gcs.cat(TEST_BUCKET + "/test2/accounts.2.json") == data2
-    assert not gcs.exists(fn1)
-    assert not gcs.exists(fn2)
+        gcs.mv([fn1, fn2], TEST_BUCKET + "/test2/")
+
+        assert gcs.cat(TEST_BUCKET + "/test2/accounts.1.json") == data1
+        assert gcs.cat(TEST_BUCKET + "/test2/accounts.2.json") == data2
+        assert not gcs.exists(fn1)
+        assert not gcs.exists(fn2)
+    else:
+        with mock.patch.object(
+            gcs, "_mv_file", new_callable=mock.AsyncMock
+        ) as mock_mv_file:
+            gcs.mv([fn1, fn2], TEST_BUCKET + "/test2/")
+
+            assert mock_mv_file.call_count == 2
+            mock_mv_file.assert_any_await(fn1, TEST_BUCKET + "/test2/accounts.1.json")
+            mock_mv_file.assert_any_await(fn2, TEST_BUCKET + "/test2/accounts.2.json")
 
 
 def test_mv_file(gcs):
-    if not gcs.on_google:
-        pytest.skip("emulator does not support moveTo")
     fn = TEST_BUCKET + "/test/accounts.1.json"
-    data = gcs.cat(fn)
-    gcs.mv_file(fn, fn + "2")
-    assert gcs.cat(fn + "2") == data
-    assert not gcs.exists(fn)
+
+    if gcs.on_google:
+        data = gcs.cat(fn)
+        gcs.mv_file(fn, fn + "2")
+        assert gcs.cat(fn + "2") == data
+        assert not gcs.exists(fn)
+    else:
+        with mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call:
+            mock_call.return_value = {
+                "kind": "storage#object",
+                "bucket": TEST_BUCKET,
+                "name": "test/accounts.1.json2",
+            }
+            gcs.mv_file(fn, fn + "2")
+            mock_call.assert_awaited_once()
 
 
 def test_mv_file_cache(gcs):
-    if not gcs.on_google:
-        pytest.skip("emulator does not support moveTo")
     fn = TEST_BUCKET + "/test/accounts.1.json"
     fn2 = TEST_BUCKET + "/nested/accounts.1.json"
     parent = TEST_BUCKET + "/test"
@@ -858,10 +937,21 @@ def test_mv_file_cache(gcs):
     gcs.ls(parent2)
     assert parent in gcs.dircache
     assert parent2 in gcs.dircache
-    gcs.mv_file(fn, fn2)
+
+    if gcs.on_google:
+        gcs.mv_file(fn, fn2)
+        assert fn2 in gcs.ls(parent2)
+    else:
+        with mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call:
+            mock_call.return_value = {
+                "kind": "storage#object",
+                "bucket": TEST_BUCKET,
+                "name": "nested/accounts.1.json",
+            }
+            gcs.mv_file(fn, fn2)
+
     assert parent not in gcs.dircache
     assert parent2 not in gcs.dircache
-    assert fn2 in gcs.ls(parent2)
 
 
 def test_mv_file_calls_move_to(gcs):
