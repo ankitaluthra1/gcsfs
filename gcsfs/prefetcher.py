@@ -17,6 +17,8 @@ PyBytes_AsString.restype = ctypes.c_void_p
 PyBytes_AsString.argtypes = [ctypes.py_object]
 
 
+# Please refer to following discussion to understand why this is required at this point
+# Discussion = https://github.com/fsspec/gcsfs/pull/795#discussion_r3032749881
 def _fast_slice(src_bytes, offset, read_size):
     if read_size == 0:
         return b""

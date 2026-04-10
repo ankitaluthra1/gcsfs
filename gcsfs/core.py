@@ -2310,9 +2310,9 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
         )
 
     def close(self):
+        super().close()
         if hasattr(self, "_prefetch_engine") and self._prefetch_engine:
             self._prefetch_engine.close()
-        super().close()
 
 
 def _convert_fixed_key_metadata(metadata, *, from_google=False):
