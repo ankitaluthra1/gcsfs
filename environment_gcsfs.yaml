@@ -22,4 +22,7 @@ dependencies:
   - requests
   - ujson
   - pip:
+      - build
+      - hatchling
+      - hatch-vcs
       - git+https://github.com/fsspec/filesystem_spec
