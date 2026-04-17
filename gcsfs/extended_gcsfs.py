@@ -142,7 +142,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         except api_exceptions.NotFound:
             logger.warning(
                 f"Error: Bucket {bucket} not found or you lack permissions for "
-                f"storage layout api. Falling back to GCSFileSystem."
+                f"storage layout api used to detect bucket type. Falling back to GCSFileSystem."
             )
             return BucketType.UNKNOWN
         except Exception as e:
