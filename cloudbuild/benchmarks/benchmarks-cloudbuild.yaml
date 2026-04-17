@@ -6,6 +6,7 @@ substitutions:
   _BENCHMARK_CONFIG: ""
   # Format: "hns regional zonal"
   _BUCKET_TYPES: ""
+  _ENABLE_EXPERIMENTAL_READS: "false"
 
 steps:
   # 1. Generate a persistent SSH key for this build run.
@@ -104,6 +105,10 @@ steps:
     id: "run-benchmarks"
     allowFailure: true
     entrypoint: "bash"
+    env:
+      - "BUCKET_TYPES=${_BUCKET_TYPES}"
+      - "BENCHMARK_CONFIG=${_BENCHMARK_CONFIG}"
+      - "ENABLE_EXPERIMENTAL_READS=${_ENABLE_EXPERIMENTAL_READS}"
     args:
       - "-c"
       - |
@@ -204,7 +209,7 @@ steps:
           echo "[$$VM_NAME]: Launching benchmark run for $$group:$$config"
 
           CUSTOM_ENV=""
-          if [[ "$$group" == *"read"* ]] && [[ " ${_BUCKET_TYPES} " =~ " regional " ]]; then
+          if [[ "$$group" == *"read"* ]] && [[ " $${BUCKET_TYPES} " =~ " regional " ]] && [[ "$${ENABLE_EXPERIMENTAL_READS}" == "true" ]]; then
             CUSTOM_ENV="export USE_EXPERIMENTAL_ADAPTIVE_PREFETCHING='true'; export DEFAULT_GCSFS_CONCURRENCY=4"
           fi
 

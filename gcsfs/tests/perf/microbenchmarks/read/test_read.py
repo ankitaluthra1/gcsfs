@@ -22,7 +22,7 @@ def _read_op_seq(gcs, file_paths, chunk_size, runtime, block_size):
     files_it = itertools.cycle(file_paths)
     while time.perf_counter() - start_time < runtime:
         path = next(files_it)
-        with gcs.open(path, "rb", block_size=block_size) as f:
+        with gcs.open(path, "rb", block_size=block_size, cache_type="none") as f:
             while time.perf_counter() - start_time < runtime:
                 data = f.read(chunk_size)
                 if not data:
