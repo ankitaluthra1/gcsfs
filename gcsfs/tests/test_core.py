@@ -1552,6 +1552,44 @@ def test_user_project_cat(gcs):
         gcs.rm(TEST_REQUESTER_PAYS_BUCKET, recursive=True)
 
 
+def test_requester_pays_cat():
+    if TEST_REQUESTER_PAYS_BUCKET == "gcsfs_test_req_pay":
+        pytest.skip("TEST_REQUESTER_PAYS_BUCKET not set to a real bucket")
+
+    gcs = GCSFileSystem(requester_pays=True)
+
+    file_path = f"{TEST_REQUESTER_PAYS_BUCKET}/test_file.txt"
+    data = b"test data requester pays"
+
+    try:
+        gcs.pipe(file_path, data)
+        assert gcs.cat(file_path) == data
+    finally:
+        try:
+            gcs.rm(file_path)
+        except Exception:
+            pass
+
+
+def test_requester_pays_cat_with_project():
+    if TEST_REQUESTER_PAYS_BUCKET == "gcsfs_test_req_pay":
+        pytest.skip("TEST_REQUESTER_PAYS_BUCKET not set to a real bucket")
+
+    gcs = GCSFileSystem(requester_pays=TEST_PROJECT)
+
+    file_path = f"{TEST_REQUESTER_PAYS_BUCKET}/test_file_project.txt"
+    data = b"test data requester pays with project"
+
+    try:
+        gcs.pipe(file_path, data)
+        assert gcs.cat(file_path) == data
+    finally:
+        try:
+            gcs.rm(file_path)
+        except Exception:
+            pass
+
+
 @mock.patch("gcsfs.credentials.gauth")
 def test_raise_on_project_mismatch(mock_auth):
     mock_auth.default.return_value = (requests.Session(), "my_other_project")

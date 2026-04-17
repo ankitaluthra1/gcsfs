@@ -69,6 +69,16 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         self._storage_layout_cache = {}
 
     @property
+    def user_project(self):
+        if self.requester_pays:
+            return (
+                self.requester_pays
+                if isinstance(self.requester_pays, str)
+                else self.project
+            )
+        return None
+
+    @property
     def grpc_client(self):
         if self.asynchronous and self._grpc_client is None:
             raise RuntimeError(
@@ -105,6 +115,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             channel = transport_cls.create_channel(
                 credentials=self.credential,
                 options=[("grpc.primary_user_agent", f"{USER_AGENT}/{version}")],
+                quota_project_id=self.user_project,
             )
             transport = transport_cls(channel=channel)
             self._storage_control_client = storage_control_v2.StorageControlAsyncClient(
