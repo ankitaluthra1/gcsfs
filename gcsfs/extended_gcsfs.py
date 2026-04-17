@@ -143,7 +143,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             logger.warning(f"Error: Bucket {bucket} not found or you lack permissions.")
             return BucketType.UNKNOWN
         except Exception as e:
-            logger.error(
+            logger.warning(
                 f"Could not determine bucket type for bucket name {bucket}: {e}"
             )
             # Default to UNKNOWN in case bucket type is not obtained
