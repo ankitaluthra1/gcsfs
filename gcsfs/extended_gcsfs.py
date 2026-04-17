@@ -140,11 +140,14 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 return BucketType.HIERARCHICAL
             return BucketType.NON_HIERARCHICAL
         except api_exceptions.NotFound:
-            logger.warning(f"Error: Bucket {bucket} not found or you lack permissions for storage layout api. Falling back to standard buckets")
+            logger.warning(
+                f"Error: Bucket {bucket} not found or you lack permissions for "
+                f"storage layout api. Falling back to GCSFileSystem."
+            )
             return BucketType.UNKNOWN
         except Exception as e:
             logger.warning(
-                f"Falling back to GCS Standard bucket. Could not determine bucket type for bucket name {bucket}: {e}"
+                f"Could not determine bucket type for bucket name {bucket}: {e}, falling back to GCSFileSystem"
             )
             # Default to UNKNOWN in case bucket type is not obtained
             return BucketType.UNKNOWN
