@@ -884,6 +884,41 @@ def test_move_recursive_with_slash(gcs):
             mock_mv_file.assert_any_await(dir_from + "file2", dir_to + "/file2")
 
 
+def test_move_with_glob_pattern(gcs):
+    path1 = TEST_BUCKET + "/test/*.json"
+    path2 = TEST_BUCKET + "/dest_glob/"
+
+    if gcs.on_google:
+        data1 = gcs.cat(TEST_BUCKET + "/test/accounts.1.json")
+        data2 = gcs.cat(TEST_BUCKET + "/test/accounts.2.json")
+
+        gcs.mv(path1, path2)
+
+        assert gcs.cat(path2 + "accounts.1.json") == data1
+        assert gcs.cat(path2 + "accounts.2.json") == data2
+        assert not gcs.exists(TEST_BUCKET + "/test/accounts.1.json")
+        assert not gcs.exists(TEST_BUCKET + "/test/accounts.2.json")
+    else:
+        fn = TEST_BUCKET + "/test/accounts.1.json"
+        with (
+            mock.patch.object(
+                gcs, "_expand_path", new_callable=mock.AsyncMock
+            ) as mock_expand,
+            mock.patch.object(gcs, "_isdir", new_callable=mock.AsyncMock) as mock_isdir,
+            mock.patch.object(
+                gcs, "_mv_file", new_callable=mock.AsyncMock
+            ) as mock_mv_file,
+        ):
+            mock_expand.return_value = [fn]
+            mock_isdir.return_value = False
+
+            gcs.mv(TEST_BUCKET + "/test/*.json", TEST_BUCKET + "/dest/")
+
+            mock_mv_file.assert_awaited_once_with(
+                fn, TEST_BUCKET + "/dest/accounts.1.json"
+            )
+
+
 def test_move_list_to_dir(gcs):
     fn1 = TEST_BUCKET + "/test/accounts.1.json"
     fn2 = TEST_BUCKET + "/test/accounts.2.json"
@@ -932,6 +967,22 @@ def test_move_list_to_list(gcs):
             assert mock_mv_file.call_count == 2
             mock_mv_file.assert_any_await(fn1, fn1 + "2")
             mock_mv_file.assert_any_await(fn2, fn2 + "2")
+
+
+def test_move_raises_filenotfound(gcs):
+    paths1 = [TEST_BUCKET + "/file1"]
+    paths2 = [TEST_BUCKET + "/dest/file1"]
+
+    with mock.patch.object(
+        gcs, "_mv_file", new_callable=mock.AsyncMock
+    ) as mock_mv_file:
+        mock_mv_file.side_effect = FileNotFoundError("not found")
+
+        with pytest.raises(FileNotFoundError, match="not found"):
+            gcs.mv(paths1, paths2, recursive=False)
+
+        with pytest.raises(FileNotFoundError, match="not found"):
+            gcs.mv(paths1, paths2, recursive=True)
 
 
 def test_move_implicit_directories_ignore_filenotfound(gcs):
@@ -1084,6 +1135,24 @@ def test_mv_file_fallback(gcs):
 
         mock_call.assert_awaited_once()
         mock_super_mv_file.assert_awaited_once_with(path1, path2)
+
+
+def test_mv_file_raises_filenotfound_from_moveto(gcs):
+    path1 = TEST_BUCKET + "/file1.txt"
+    path2 = TEST_BUCKET + "/file2.txt"
+
+    with (
+        mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call,
+        mock.patch(
+            "fsspec.asyn.AsyncFileSystem._mv_file", new_callable=mock.AsyncMock
+        ) as mock_super_mv_file,
+    ):
+        mock_call.side_effect = FileNotFoundError("not found")
+
+        with pytest.raises(FileNotFoundError, match="not found"):
+            gcs.mv_file(path1, path2)
+
+        mock_super_mv_file.assert_not_awaited()
 
 
 @pytest.mark.asyncio
