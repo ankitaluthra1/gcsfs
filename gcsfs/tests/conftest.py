@@ -20,6 +20,7 @@ from gcsfs.extended_gcsfs import BucketType
 from gcsfs.tests.settings import (
     TEST_BUCKET,
     TEST_HNS_BUCKET,
+    TEST_HNS_REQUESTER_PAYS_BUCKET,
     TEST_REQUESTER_PAYS_BUCKET,
     TEST_VERSIONED_BUCKET,
     TEST_ZONAL_BUCKET,
@@ -146,11 +147,17 @@ def buckets_to_delete():
 
 @pytest.fixture(scope="session")
 def requester_pays_bucket(gcs_factory, buckets_to_delete):
-    gcs = gcs_factory()
+    gcs = gcs_factory(requester_pays=True)
 
     if not gcs.on_google:
         pytest.skip("no requester-pays on emulation")
 
+    if TEST_REQUESTER_PAYS_BUCKET == "gcsfs_test_req_pay":
+        pytest.skip(
+            "TEST_REQUESTER_PAYS_BUCKET is set to default 'gcsfs_test_req_pay'. Skipping test."
+        )
+
+    # Custom name provided, create if missing
     if not gcs.exists(TEST_REQUESTER_PAYS_BUCKET):
         try:
             gcs.mkdir(TEST_REQUESTER_PAYS_BUCKET)
@@ -161,6 +168,32 @@ def requester_pays_bucket(gcs_factory, buckets_to_delete):
             pytest.fail(f"Failed to setup requester pays bucket: {e}")
 
     yield TEST_REQUESTER_PAYS_BUCKET
+
+
+@pytest.fixture(scope="session")
+def hns_requester_pays_bucket(gcs_factory, buckets_to_delete):
+    gcs = gcs_factory(requester_pays=True)
+
+    if not gcs.on_google:
+        pytest.skip("no requester-pays on emulation")
+
+    if TEST_HNS_REQUESTER_PAYS_BUCKET == "gcsfs_hns_test_req_pay":
+        pytest.skip(
+            "TEST_HNS_REQUESTER_PAYS_BUCKET is set to default 'gcsfs_hns_test_req_pay'. Skipping test."
+        )
+
+    # Custom name provided, create if missing
+    if not gcs.exists(TEST_HNS_REQUESTER_PAYS_BUCKET):
+        try:
+            gcs.mkdir(
+                TEST_HNS_REQUESTER_PAYS_BUCKET, enable_hierarchical_namespace=True
+            )
+            gcs.make_bucket_requester_pays(TEST_HNS_REQUESTER_PAYS_BUCKET)
+            buckets_to_delete.add(TEST_HNS_REQUESTER_PAYS_BUCKET)
+        except Exception as e:
+            pytest.fail(f"Failed to setup requester pays HNS bucket: {e}")
+
+    yield TEST_HNS_REQUESTER_PAYS_BUCKET
 
 
 @pytest.fixture
@@ -395,7 +428,7 @@ def gcs_hns(gcs_factory, buckets_to_delete):
     try:
         if not gcs.exists(TEST_HNS_BUCKET):
             # Note: Emulators may not fully support HNS features like real GCS.
-            gcs.mkdir(TEST_HNS_BUCKET, enable_hierarchial_namespace=True)
+            gcs.mkdir(TEST_HNS_BUCKET, enable_hierarchical_namespace=True)
             buckets_to_delete.add(TEST_HNS_BUCKET)
         else:
             _cleanup_gcs(gcs, bucket=TEST_HNS_BUCKET)

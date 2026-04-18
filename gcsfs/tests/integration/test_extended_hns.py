@@ -18,11 +18,7 @@ import uuid
 import pytest
 
 from gcsfs.extended_gcsfs import BucketType, ExtendedGcsFileSystem
-from gcsfs.tests.settings import (
-    TEST_HNS_BUCKET,
-    TEST_HNS_REQUESTER_PAYS_BUCKET,
-    TEST_PROJECT,
-)
+from gcsfs.tests.settings import TEST_HNS_BUCKET, TEST_PROJECT
 
 should_run_hns = os.getenv("GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT", "false").lower() in (
     "true",
@@ -1621,10 +1617,10 @@ class TestHNSFolderStatus:
 class TestExtendedGcsFileSystemHnsRequesterPays:
     """Integration tests for HNS operations on requester pays buckets."""
 
-    def test_hns_mkdir_fails_without_quota_project(self):
+    def test_hns_mkdir_fails_without_quota_project(self, hns_requester_pays_bucket):
         """Test that HNS mkdir fails if quota project is not provided on a req pays bucket."""
 
-        bucket = TEST_HNS_REQUESTER_PAYS_BUCKET
+        bucket = hns_requester_pays_bucket
         dir_path = f"{bucket}/new_dir_{uuid.uuid4().hex}"
 
         fs = ExtendedGcsFileSystem(requester_pays=False)
@@ -1635,10 +1631,10 @@ class TestExtendedGcsFileSystemHnsRequesterPays:
 
         assert "Bucket is requester pays" in str(excinfo.value)
 
-    def test_hns_mkdir_succeeds_with_quota_project(self):
+    def test_hns_mkdir_succeeds_with_quota_project(self, hns_requester_pays_bucket):
         """Test that HNS mkdir succeeds if quota project is provided on a req pays bucket."""
 
-        bucket = TEST_HNS_REQUESTER_PAYS_BUCKET
+        bucket = hns_requester_pays_bucket
         dir_path = f"{bucket}/new_dir_{uuid.uuid4().hex}"
 
         # Pass project explicitly to ensure it's used as quota_project_id
@@ -1655,16 +1651,13 @@ class TestExtendedGcsFileSystemHnsRequesterPays:
             except Exception:
                 pass
 
-    def test_hns_bucket_type_detection_with_req_pays(self):
+    def test_hns_bucket_type_detection_with_req_pays(self, hns_requester_pays_bucket):
         """Test that hns apis are invoked and return HNS when req pays is enabled."""
-
-        if TEST_HNS_REQUESTER_PAYS_BUCKET == "gcsfs_hns_test_req_pay":
-            pytest.skip("TEST_HNS_REQUESTER_PAYS_BUCKET not set to a real bucket")
 
         fs = ExtendedGcsFileSystem(project=TEST_PROJECT, requester_pays=True)
 
         # Clear cache to force lookup
         fs._storage_layout_cache.clear()
 
-        bucket_type = fs._sync_lookup_bucket_type(TEST_HNS_REQUESTER_PAYS_BUCKET)
+        bucket_type = fs._sync_lookup_bucket_type(hns_requester_pays_bucket)
         assert bucket_type == BucketType.HIERARCHICAL
