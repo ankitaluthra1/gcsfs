@@ -997,6 +997,9 @@ def test_mv_file_cache(gcs):
 
     if gcs.on_google:
         gcs.mv_file(fn, fn2)
+
+        assert parent not in gcs.dircache
+        assert parent2 not in gcs.dircache
         assert fn2 in gcs.ls(parent2)
     else:
         with mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call:
@@ -1007,8 +1010,8 @@ def test_mv_file_cache(gcs):
             }
             gcs.mv_file(fn, fn2)
 
-    assert parent not in gcs.dircache
-    assert parent2 not in gcs.dircache
+        assert parent not in gcs.dircache
+        assert parent2 not in gcs.dircache
 
 
 def test_mv_file_calls_move_to(gcs):
