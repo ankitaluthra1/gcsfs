@@ -29,6 +29,7 @@ case "$TEST_SUITE" in
   "standard")
     export GCSFS_TEST_BUCKET="gcsfs-test-standard-${SHORT_BUILD_ID}"
     export GCSFS_TEST_VERSIONED_BUCKET="gcsfs-test-versioned-${SHORT_BUILD_ID}"
+    export GCSFS_TEST_REQ_PAYS_BUCKET="gcsfs-test-standard-req-pay-${SHORT_BUILD_ID}"
     pytest "${ARGS[@]}" gcsfs/ --deselect gcsfs/tests/test_core.py::test_sign
     ;;
 
@@ -49,6 +50,8 @@ case "$TEST_SUITE" in
     export GCSFS_TEST_BUCKET="gcsfs-test-hns-${SHORT_BUILD_ID}"
     export GCSFS_ZONAL_TEST_BUCKET="gcsfs-test-hns-${SHORT_BUILD_ID}"
     export GCSFS_HNS_TEST_BUCKET="gcsfs-test-hns-${SHORT_BUILD_ID}"
+    export GCSFS_TEST_REQ_PAYS_BUCKET="gcsfs-test-hns-req-pay-${SHORT_BUILD_ID}"
+    export GCSFS_HNS_TEST_REQ_PAYS_BUCKET="gcsfs-test-hns-req-pay-${SHORT_BUILD_ID}"
     export GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT='true'
     # Excludes tests that are not applicable to HNS buckets:
     # - test_extended_gcsfs.py, test_zonal_file.py: Zonal bucket specific tests which won't work on HNS bucket.

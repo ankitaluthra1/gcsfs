@@ -20,6 +20,7 @@ from gcsfs.extended_gcsfs import BucketType
 from gcsfs.tests.settings import (
     TEST_BUCKET,
     TEST_HNS_BUCKET,
+    TEST_REQUESTER_PAYS_BUCKET,
     TEST_VERSIONED_BUCKET,
     TEST_ZONAL_BUCKET,
 )
@@ -141,6 +142,25 @@ def buckets_to_delete():
     should remove at the end of the entire test session.
     """
     return set()
+
+
+@pytest.fixture(scope="session")
+def requester_pays_bucket(gcs_factory, buckets_to_delete):
+    gcs = gcs_factory()
+
+    if not gcs.on_google:
+        pytest.skip("no requester-pays on emulation")
+
+    if not gcs.exists(TEST_REQUESTER_PAYS_BUCKET):
+        try:
+            gcs.mkdir(TEST_REQUESTER_PAYS_BUCKET)
+            gcs.make_bucket_requester_pays(TEST_REQUESTER_PAYS_BUCKET)
+            # Mark for deletion at the end of the test session
+            buckets_to_delete.add(TEST_REQUESTER_PAYS_BUCKET)
+        except Exception as e:
+            pytest.fail(f"Failed to setup requester pays bucket: {e}")
+
+    yield TEST_REQUESTER_PAYS_BUCKET
 
 
 @pytest.fixture

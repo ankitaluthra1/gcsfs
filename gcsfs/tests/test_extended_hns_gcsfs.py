@@ -2065,9 +2065,6 @@ class TestExtendedGcsFileSystemRm:
 
 @pytest.mark.asyncio
 async def test_get_control_plane_client_quota_project_id():
-    from google.cloud import storage_control_v2
-
-    from gcsfs.extended_gcsfs import ExtendedGcsFileSystem
 
     fs = ExtendedGcsFileSystem(project="my-project", requester_pays="my-user-project")
 
@@ -2091,9 +2088,6 @@ async def test_get_control_plane_client_quota_project_id():
 
 @pytest.mark.asyncio
 async def test_get_control_plane_client_quota_project_id_bool():
-    from google.cloud import storage_control_v2
-
-    from gcsfs.extended_gcsfs import ExtendedGcsFileSystem
 
     fs = ExtendedGcsFileSystem(project="my-project", requester_pays=True)
 

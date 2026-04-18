@@ -1538,27 +1538,9 @@ def test_user_project_fallback_google_default(monkeypatch):
     assert fs.project == "my_default_project"
 
 
-def test_user_project_cat(gcs):
-    if not gcs.on_google:
-        pytest.skip("no requester-pays on emulation")
-    gcs.mkdir(TEST_REQUESTER_PAYS_BUCKET)
-    try:
-        gcs.pipe(TEST_REQUESTER_PAYS_BUCKET + "/foo.csv", b"data")
-        gcs.make_bucket_requester_pays(TEST_REQUESTER_PAYS_BUCKET)
-        gcs = GCSFileSystem(requester_pays=True)
-        result = gcs.cat(TEST_REQUESTER_PAYS_BUCKET + "/foo.csv")
-        assert len(result)
-    finally:
-        gcs.rm(TEST_REQUESTER_PAYS_BUCKET, recursive=True)
-
-
-def test_requester_pays_cat():
-    if TEST_REQUESTER_PAYS_BUCKET == "gcsfs_test_req_pay":
-        pytest.skip("TEST_REQUESTER_PAYS_BUCKET not set to a real bucket")
-
+def test_requester_pays_cat(requester_pays_bucket):
     gcs = GCSFileSystem(requester_pays=True)
-
-    file_path = f"{TEST_REQUESTER_PAYS_BUCKET}/test_file.txt"
+    file_path = f"{requester_pays_bucket}/test_file.txt"
     data = b"test data requester pays"
 
     try:
@@ -1571,13 +1553,9 @@ def test_requester_pays_cat():
             pass
 
 
-def test_requester_pays_cat_with_project():
-    if TEST_REQUESTER_PAYS_BUCKET == "gcsfs_test_req_pay":
-        pytest.skip("TEST_REQUESTER_PAYS_BUCKET not set to a real bucket")
-
+def test_requester_pays_cat_with_project(requester_pays_bucket):
     gcs = GCSFileSystem(requester_pays=TEST_PROJECT)
-
-    file_path = f"{TEST_REQUESTER_PAYS_BUCKET}/test_file_project.txt"
+    file_path = f"{requester_pays_bucket}/test_file_project.txt"
     data = b"test data requester pays with project"
 
     try:
