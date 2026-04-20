@@ -70,6 +70,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
     @property
     def _user_project(self):
+        """Value used for billing - enabling "requestor pays" access"""
         if self.requester_pays:
             return (
                 self.requester_pays
