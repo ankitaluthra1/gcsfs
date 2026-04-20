@@ -152,11 +152,6 @@ def requester_pays_bucket(gcs_factory, buckets_to_delete):
     if not gcs.on_google:
         pytest.skip("no requester-pays on emulation")
 
-    if TEST_REQUESTER_PAYS_BUCKET == "gcsfs_test_req_pay":
-        pytest.skip(
-            "TEST_REQUESTER_PAYS_BUCKET is set to default 'gcsfs_test_req_pay'. Skipping test."
-        )
-
     try:
         if not gcs.exists(TEST_REQUESTER_PAYS_BUCKET):
             gcs.mkdir(TEST_REQUESTER_PAYS_BUCKET)
@@ -176,11 +171,6 @@ def hns_requester_pays_bucket(gcs_factory, buckets_to_delete):
 
     if not gcs.on_google:
         pytest.skip("no requester-pays on emulation")
-
-    if TEST_HNS_REQUESTER_PAYS_BUCKET == "gcsfs_hns_test_req_pay":
-        pytest.skip(
-            "TEST_HNS_REQUESTER_PAYS_BUCKET is set to default 'gcsfs_hns_test_req_pay'. Skipping test."
-        )
 
     try:
         if not gcs.exists(TEST_HNS_REQUESTER_PAYS_BUCKET):

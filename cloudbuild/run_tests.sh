@@ -37,6 +37,7 @@ case "$TEST_SUITE" in
     export GCSFS_TEST_BUCKET="gcsfs-test-standard-for-zonal-${SHORT_BUILD_ID}"
     export GCSFS_ZONAL_TEST_BUCKET="gcsfs-test-zonal-${SHORT_BUILD_ID}"
     export GCSFS_HNS_TEST_BUCKET="gcsfs-test-zonal-${SHORT_BUILD_ID}"
+    export GCSFS_HNS_TEST_REQ_PAYS_BUCKET="gcsfs-test-zonal-${SHORT_BUILD_ID}"
     ulimit -n 4096
     export GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT='true'
     pytest "${ARGS[@]}" \
@@ -72,6 +73,7 @@ case "$TEST_SUITE" in
 
   "zonal-core")
     export GCSFS_TEST_BUCKET="gcsfs-test-zonal-core-${SHORT_BUILD_ID}"
+    export GCSFS_TEST_REQ_PAYS_BUCKET="gcsfs-test-zonal-core-${SHORT_BUILD_ID}"
     export GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT='true'
     ulimit -n 4096
 
