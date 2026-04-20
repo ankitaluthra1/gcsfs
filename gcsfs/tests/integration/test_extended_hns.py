@@ -1640,16 +1640,10 @@ class TestExtendedGcsFileSystemHnsRequesterPays:
         # Pass project explicitly to ensure it's used as quota_project_id
         fs = ExtendedGcsFileSystem(project=TEST_PROJECT, requester_pays=True)
 
-        try:
-            fs.mkdir(dir_path)
-            # Invalidate cache to force reading from backend
-            fs.invalidate_cache()
-            assert fs.isdir(dir_path)
-        finally:
-            try:
-                fs.rmdir(dir_path)
-            except Exception:
-                pass
+        fs.mkdir(dir_path)
+        # Invalidate cache to force reading from backend
+        fs.invalidate_cache()
+        assert fs.isdir(dir_path)
 
     def test_hns_bucket_type_detection_with_req_pays(self, hns_requester_pays_bucket):
         """Test that hns apis are invoked and return HNS when req pays is enabled."""

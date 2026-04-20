@@ -69,7 +69,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         self._storage_layout_cache = {}
 
     @property
-    def user_project(self):
+    def _user_project(self):
         if self.requester_pays:
             return (
                 self.requester_pays
@@ -115,7 +115,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             channel = transport_cls.create_channel(
                 credentials=self.credential,
                 options=[("grpc.primary_user_agent", f"{USER_AGENT}/{version}")],
-                quota_project_id=self.user_project,
+                quota_project_id=self._user_project,
             )
             transport = transport_cls(channel=channel)
             self._storage_control_client = storage_control_v2.StorageControlAsyncClient(

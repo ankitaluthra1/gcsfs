@@ -1543,14 +1543,8 @@ def test_requester_pays_cat(requester_pays_bucket):
     file_path = f"{requester_pays_bucket}/test_file.txt"
     data = b"test data requester pays"
 
-    try:
-        gcs.pipe(file_path, data)
-        assert gcs.cat(file_path) == data
-    finally:
-        try:
-            gcs.rm(file_path)
-        except Exception:
-            pass
+    gcs.pipe(file_path, data)
+    assert gcs.cat(file_path) == data
 
 
 def test_requester_pays_cat_with_project(requester_pays_bucket):
@@ -1558,14 +1552,8 @@ def test_requester_pays_cat_with_project(requester_pays_bucket):
     file_path = f"{requester_pays_bucket}/test_file_project.txt"
     data = b"test data requester pays with project"
 
-    try:
-        gcs.pipe(file_path, data)
-        assert gcs.cat(file_path) == data
-    finally:
-        try:
-            gcs.rm(file_path)
-        except Exception:
-            pass
+    gcs.pipe(file_path, data)
+    assert gcs.cat(file_path) == data
 
 
 @mock.patch("gcsfs.credentials.gauth")

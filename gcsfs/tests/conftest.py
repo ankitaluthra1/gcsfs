@@ -145,7 +145,7 @@ def buckets_to_delete():
     return set()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def requester_pays_bucket(gcs_factory, buckets_to_delete):
     gcs = gcs_factory(requester_pays=True)
 
@@ -157,20 +157,20 @@ def requester_pays_bucket(gcs_factory, buckets_to_delete):
             "TEST_REQUESTER_PAYS_BUCKET is set to default 'gcsfs_test_req_pay'. Skipping test."
         )
 
-    # Custom name provided, create if missing
-    if not gcs.exists(TEST_REQUESTER_PAYS_BUCKET):
-        try:
+    try:
+        if not gcs.exists(TEST_REQUESTER_PAYS_BUCKET):
             gcs.mkdir(TEST_REQUESTER_PAYS_BUCKET)
             gcs.make_bucket_requester_pays(TEST_REQUESTER_PAYS_BUCKET)
-            # Mark for deletion at the end of the test session
             buckets_to_delete.add(TEST_REQUESTER_PAYS_BUCKET)
-        except Exception as e:
-            pytest.fail(f"Failed to setup requester pays bucket: {e}")
+        else:
+            _cleanup_gcs(gcs, bucket=TEST_REQUESTER_PAYS_BUCKET, bucket_populated=False)
 
-    yield TEST_REQUESTER_PAYS_BUCKET
+        yield TEST_REQUESTER_PAYS_BUCKET
+    finally:
+        _cleanup_gcs(gcs, bucket=TEST_REQUESTER_PAYS_BUCKET, bucket_populated=False)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def hns_requester_pays_bucket(gcs_factory, buckets_to_delete):
     gcs = gcs_factory(requester_pays=True)
 
@@ -182,18 +182,21 @@ def hns_requester_pays_bucket(gcs_factory, buckets_to_delete):
             "TEST_HNS_REQUESTER_PAYS_BUCKET is set to default 'gcsfs_hns_test_req_pay'. Skipping test."
         )
 
-    # Custom name provided, create if missing
-    if not gcs.exists(TEST_HNS_REQUESTER_PAYS_BUCKET):
-        try:
+    try:
+        if not gcs.exists(TEST_HNS_REQUESTER_PAYS_BUCKET):
             gcs.mkdir(
                 TEST_HNS_REQUESTER_PAYS_BUCKET, enable_hierarchical_namespace=True
             )
             gcs.make_bucket_requester_pays(TEST_HNS_REQUESTER_PAYS_BUCKET)
             buckets_to_delete.add(TEST_HNS_REQUESTER_PAYS_BUCKET)
-        except Exception as e:
-            pytest.fail(f"Failed to setup requester pays HNS bucket: {e}")
+        else:
+            _cleanup_gcs(
+                gcs, bucket=TEST_HNS_REQUESTER_PAYS_BUCKET, bucket_populated=False
+            )
 
-    yield TEST_HNS_REQUESTER_PAYS_BUCKET
+        yield TEST_HNS_REQUESTER_PAYS_BUCKET
+    finally:
+        _cleanup_gcs(gcs, bucket=TEST_HNS_REQUESTER_PAYS_BUCKET, bucket_populated=False)
 
 
 @pytest.fixture
