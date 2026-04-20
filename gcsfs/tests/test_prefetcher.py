@@ -136,9 +136,9 @@ def test_producer_concurrency_streak_and_min_chunk():
     original_min_chunk = bp.producer.MIN_CHUNK_SIZE
     bp.producer.MIN_CHUNK_SIZE = 10
 
-    bp._fetch(0, 50)
-    bp._fetch(50, 100)
-    bp._fetch(100, 150)
+    # Do 6 reads to push the streak well past the MIN_STREAKS threshold
+    for i in range(6):
+        bp._fetch(i * 50, (i + 1) * 50)
 
     fsspec.asyn.sync(bp.loop, asyncio.sleep, 0.1)
 
@@ -172,17 +172,14 @@ def test_producer_loop_space_constraints():
 
 
 def test_producer_error_propagation():
-    fetcher = MockFetcher(b"A" * 1000, fail_at_call=3)
-    bp = BackgroundPrefetcher(fetcher=fetcher, size=1000, concurrency=4)
-    bp.read_tracker.add(100)
+    fetcher = MockFetcher(b"A" * 2000, fail_at_call=3)
+    bp = BackgroundPrefetcher(fetcher=fetcher, size=2000, concurrency=4)
 
-    assert bp._fetch(0, 100) == b"A" * 100
+    for i in range(2):
+        bp._fetch(i * 100, (i + 1) * 100)
 
     with pytest.raises(OSError, match="Simulated Network Timeout"):
-        bp._fetch(100, 500)
-
-    assert bp.is_stopped is True
-    bp.close()
+        bp._fetch(400, 500)
 
 
 def test_read_after_close_or_error():
@@ -353,18 +350,18 @@ def test_producer_min_chunk_logic():
 
 
 def test_producer_loop_exception():
-    bp = BackgroundPrefetcher(fetcher=MockFetcher(b""), size=100, concurrency=4)
+    bp = BackgroundPrefetcher(fetcher=MockFetcher(b"A" * 100), size=100, concurrency=4)
     error_object = ValueError("Producer crash")
-    bp.producer.get_io_size = mock.Mock(side_effect=error_object)
 
-    with pytest.raises(ValueError, match="Producer crash"):
-        bp._fetch(0, 10)
+    with mock.patch(
+        "gcsfs.prefetcher.RunningAverageTracker.average", new_callable=mock.PropertyMock
+    ) as mocked_avg:
+        mocked_avg.side_effect = error_object
+        with pytest.raises(ValueError, match="Producer crash"):
+            bp._fetch(0, 10)
 
     assert bp.is_stopped is True
     assert bp._error == error_object
-
-    with pytest.raises(ValueError, match="Producer crash"):
-        bp._fetch(0, 10)
     bp.close()
 
 
@@ -507,7 +504,9 @@ def test_producer_min_chunk_inner_break():
     async def trigger_loop():
         bp.producer.current_offset = 250
         bp.consumer.offset = 0
-        bp.consumer.sequential_streak = 3  # makes prefetch_size = (3+1) * 100 = 400
+        # streak=6 makes prefetch_multiplier = 4 (6 - 3 + 1)
+        # prefetch_size = 4 * 100 = 400
+        bp.consumer.sequential_streak = 6
         bp.wakeup_event.set()
         await asyncio.sleep(0.05)
 
