@@ -1538,18 +1538,37 @@ def test_user_project_fallback_google_default(monkeypatch):
     assert fs.project == "my_default_project"
 
 
-def test_user_project_cat(gcs):
-    if not gcs.on_google:
-        pytest.skip("no requester-pays on emulation")
-    gcs.mkdir(TEST_REQUESTER_PAYS_BUCKET)
-    try:
-        gcs.pipe(TEST_REQUESTER_PAYS_BUCKET + "/foo.csv", b"data")
-        gcs.make_bucket_requester_pays(TEST_REQUESTER_PAYS_BUCKET)
-        gcs = GCSFileSystem(requester_pays=True)
-        result = gcs.cat(TEST_REQUESTER_PAYS_BUCKET + "/foo.csv")
-        assert len(result)
-    finally:
-        gcs.rm(TEST_REQUESTER_PAYS_BUCKET, recursive=True)
+@pytest.mark.parametrize("requester_pays", [True, TEST_PROJECT])
+def test_requester_pays_cat(requester_pays_bucket, requester_pays):
+    gcs = GCSFileSystem(requester_pays=requester_pays)
+    file_path = f"{requester_pays_bucket}/test_file.txt"
+    data = b"test data requester pays"
+
+    gcs.pipe(file_path, data)
+    assert gcs.cat(file_path) == data
+
+
+def test_requester_pays_fails_without_user_project(requester_pays_bucket):
+    """Test that operations on a requester-pays bucket fail if the flag is not set."""
+    fs = GCSFileSystem(requester_pays=False)
+    with pytest.raises(ValueError, match="Bucket is requester pays"):
+        fs.ls(requester_pays_bucket)
+
+
+def test_fs_requester_pays_on_bucket_without_requester_pays(gcs, gcs_factory):
+    """Test that metadata and data operations work when fs has requester_pays=True
+    but the bucket does not have requester-pays enabled."""
+    fs = gcs_factory(requester_pays=True)
+    file_path = f"{TEST_BUCKET}/test_req_pays_data_{uuid.uuid4().hex}"
+    data = b"test data"
+
+    # Metadata operations
+    assert fs.exists(TEST_BUCKET)
+    assert isinstance(fs.ls(TEST_BUCKET), list)
+
+    # Data operations
+    fs.pipe(file_path, data)
+    assert fs.cat(file_path) == data
 
 
 @mock.patch("gcsfs.credentials.gauth")
