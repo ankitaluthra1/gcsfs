@@ -1556,6 +1556,22 @@ def test_requester_pays_cat_with_project(requester_pays_bucket):
     assert gcs.cat(file_path) == data
 
 
+def test_fs_requester_pays_on_bucket_without_requester_pays(gcs, gcs_factory):
+    """Test that metadata and data operations work when fs has requester_pays=True
+    but the bucket does not have requester-pays enabled."""
+    fs = gcs_factory(requester_pays=True)
+    file_path = f"{TEST_BUCKET}/test_req_pays_data_{uuid.uuid4().hex}"
+    data = b"test data"
+
+    # Metadata operations
+    assert fs.exists(TEST_BUCKET)
+    assert isinstance(fs.ls(TEST_BUCKET), list)
+
+    # Data operations
+    fs.pipe(file_path, data)
+    assert fs.cat(file_path) == data
+
+
 @mock.patch("gcsfs.credentials.gauth")
 def test_raise_on_project_mismatch(mock_auth):
     mock_auth.default.return_value = (requests.Session(), "my_other_project")
