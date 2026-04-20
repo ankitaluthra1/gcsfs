@@ -9,13 +9,14 @@ common:
     - 1
     - 16
     - 100
-  rounds: 5
+  rounds: 3
   runtime: 30 # 30 secs
 
 scenarios:
   - name: "read_seq_fixed_duration"
     pattern: "seq"
     processes: [1, 16, 48]
+    files: 1
 
   - name: "read_rand_fixed_duration"
     pattern: "rand"
