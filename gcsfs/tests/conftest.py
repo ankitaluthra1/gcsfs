@@ -158,11 +158,11 @@ def requester_pays_bucket(gcs_factory, buckets_to_delete):
             gcs.make_bucket_requester_pays(TEST_REQUESTER_PAYS_BUCKET)
             buckets_to_delete.add(TEST_REQUESTER_PAYS_BUCKET)
         else:
-            _cleanup_gcs(gcs, bucket=TEST_REQUESTER_PAYS_BUCKET, bucket_populated=False)
+            _cleanup_gcs(gcs, bucket=TEST_REQUESTER_PAYS_BUCKET)
 
         yield TEST_REQUESTER_PAYS_BUCKET
     finally:
-        _cleanup_gcs(gcs, bucket=TEST_REQUESTER_PAYS_BUCKET, bucket_populated=False)
+        _cleanup_gcs(gcs, bucket=TEST_REQUESTER_PAYS_BUCKET)
 
 
 @pytest.fixture
@@ -180,13 +180,11 @@ def hns_requester_pays_bucket(gcs_factory, buckets_to_delete):
             gcs.make_bucket_requester_pays(TEST_HNS_REQUESTER_PAYS_BUCKET)
             buckets_to_delete.add(TEST_HNS_REQUESTER_PAYS_BUCKET)
         else:
-            _cleanup_gcs(
-                gcs, bucket=TEST_HNS_REQUESTER_PAYS_BUCKET, bucket_populated=False
-            )
+            _cleanup_gcs(gcs, bucket=TEST_HNS_REQUESTER_PAYS_BUCKET)
 
         yield TEST_HNS_REQUESTER_PAYS_BUCKET
     finally:
-        _cleanup_gcs(gcs, bucket=TEST_HNS_REQUESTER_PAYS_BUCKET, bucket_populated=False)
+        _cleanup_gcs(gcs, bucket=TEST_HNS_REQUESTER_PAYS_BUCKET)
 
 
 @pytest.fixture
@@ -275,7 +273,12 @@ def final_cleanup(gcs_factory, buckets_to_delete):
     yield
     # This code runs after the entire test session finishes
 
-    gcs = gcs_factory()
+    # Check if we have any requester pays buckets in the deletion list
+    use_requester_pays = any(
+        bucket in [TEST_REQUESTER_PAYS_BUCKET, TEST_HNS_REQUESTER_PAYS_BUCKET]
+        for bucket in buckets_to_delete
+    )
+    gcs = gcs_factory(requester_pays=use_requester_pays)
     for bucket in buckets_to_delete:
         # The cleanup logic attempts to delete every bucket that was
         # added to the set during the session. For real GCS, only delete if
@@ -285,7 +288,7 @@ def final_cleanup(gcs_factory, buckets_to_delete):
                 gcs.rm(bucket, recursive=True)
                 logging.info(f"Cleaned up bucket: {bucket}")
         except Exception as e:
-            logging.warning(f"Failed to perform final cleanup for bucket {bucket}: {e}")
+            logging.error(f"Failed to perform final cleanup for bucket {bucket}: {e}")
 
 
 @pytest.fixture
