@@ -40,11 +40,14 @@ case "$TEST_SUITE" in
     export GCSFS_HNS_TEST_REQ_PAYS_BUCKET="gcsfs-test-zonal-${SHORT_BUILD_ID}"
     ulimit -n 4096
     export GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT='true'
+    # Excludes tests related to requster pays as Zonal buckets do not support requester pays feature
     pytest "${ARGS[@]}" \
       gcsfs/tests/test_extended_gcsfs.py \
       gcsfs/tests/test_zonal_file.py \
       gcsfs/tests/integration/test_async_gcsfs.py \
-      gcsfs/tests/integration/test_extended_hns.py
+      gcsfs/tests/integration/test_extended_hns.py \
+      --deselect gcsfs/tests/integration/test_extended_hns.py::TestExtendedGcsFileSystemHnsRequesterPays::test_hns_mkdir_fails_without_quota_project \
+      --deselect gcsfs/tests/integration/test_extended_hns.py::TestExtendedGcsFileSystemHnsRequesterPays::test_hns_bucket_type_detection_with_req_pays
     ;;
 
   "hns")
@@ -137,6 +140,11 @@ case "$TEST_SUITE" in
       "--deselect=gcsfs/tests/test_core.py::test_gcsfile_prefetch_random_seek_integrity"
       "--deselect=gcsfs/tests/test_core.py::test_gcsfile_multithreaded_read_integrity"
       "--deselect=gcsfs/tests/test_core.py::test_gcsfile_not_satisfiable_range"
+    )
+
+    # Zonal buckets do not support the requester pays feature
+    ZONAL_DESELECTS+=(
+      "--deselect=gcsfs/tests/test_core.py::test_requester_pays_fails_without_user_project"
     )
 
     pytest "${ARGS[@]}" "${ZONAL_DESELECTS[@]}" gcsfs/tests/test_core.py
