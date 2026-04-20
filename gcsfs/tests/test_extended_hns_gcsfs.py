@@ -2064,32 +2064,18 @@ class TestExtendedGcsFileSystemRm:
 
 
 @pytest.mark.asyncio
-async def test_get_control_plane_client_quota_project_id():
+@pytest.mark.parametrize(
+    "requester_pays, expected_quota_project",
+    [
+        ("my-user-project", "my-user-project"),
+        (True, "my-project"),
+    ],
+)
+async def test_get_control_plane_client_quota_project_id(
+    requester_pays, expected_quota_project
+):
 
-    fs = ExtendedGcsFileSystem(project="my-project", requester_pays="my-user-project")
-
-    mock_transport_cls = mock.Mock()
-    mock_channel = mock.Mock()
-    mock_transport_cls.create_channel.return_value = mock_channel
-
-    with mock.patch.object(
-        storage_control_v2.StorageControlAsyncClient,
-        "get_transport_class",
-        return_value=mock_transport_cls,
-    ) as mock_get_transport:
-
-        await fs._get_control_plane_client()
-
-        mock_get_transport.assert_called_once_with("grpc_asyncio")
-        mock_transport_cls.create_channel.assert_called_once()
-        kwargs = mock_transport_cls.create_channel.call_args.kwargs
-        assert kwargs["quota_project_id"] == "my-user-project"
-
-
-@pytest.mark.asyncio
-async def test_get_control_plane_client_quota_project_id_bool():
-
-    fs = ExtendedGcsFileSystem(project="my-project", requester_pays=True)
+    fs = ExtendedGcsFileSystem(project="my-project", requester_pays=requester_pays)
 
     mock_transport_cls = mock.Mock()
     mock_channel = mock.Mock()
@@ -2106,4 +2092,4 @@ async def test_get_control_plane_client_quota_project_id_bool():
         mock_get_transport.assert_called_once_with("grpc_asyncio")
         mock_transport_cls.create_channel.assert_called_once()
         kwargs = mock_transport_cls.create_channel.call_args.kwargs
-        assert kwargs["quota_project_id"] == "my-project"
+        assert kwargs["quota_project_id"] == expected_quota_project

@@ -273,12 +273,7 @@ def final_cleanup(gcs_factory, buckets_to_delete):
     yield
     # This code runs after the entire test session finishes
 
-    # Check if we have any requester pays buckets in the deletion list
-    use_requester_pays = any(
-        bucket in [TEST_REQUESTER_PAYS_BUCKET, TEST_HNS_REQUESTER_PAYS_BUCKET]
-        for bucket in buckets_to_delete
-    )
-    gcs = gcs_factory(requester_pays=use_requester_pays)
+    gcs = gcs_factory(requester_pays=True)
     for bucket in buckets_to_delete:
         # The cleanup logic attempts to delete every bucket that was
         # added to the set during the session. For real GCS, only delete if

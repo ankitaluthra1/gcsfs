@@ -1538,19 +1538,11 @@ def test_user_project_fallback_google_default(monkeypatch):
     assert fs.project == "my_default_project"
 
 
-def test_requester_pays_cat(requester_pays_bucket):
-    gcs = GCSFileSystem(requester_pays=True)
+@pytest.mark.parametrize("requester_pays", [True, TEST_PROJECT])
+def test_requester_pays_cat(requester_pays_bucket, requester_pays):
+    gcs = GCSFileSystem(requester_pays=requester_pays)
     file_path = f"{requester_pays_bucket}/test_file.txt"
     data = b"test data requester pays"
-
-    gcs.pipe(file_path, data)
-    assert gcs.cat(file_path) == data
-
-
-def test_requester_pays_cat_with_project(requester_pays_bucket):
-    gcs = GCSFileSystem(requester_pays=TEST_PROJECT)
-    file_path = f"{requester_pays_bucket}/test_file_project.txt"
-    data = b"test data requester pays with project"
 
     gcs.pipe(file_path, data)
     assert gcs.cat(file_path) == data
