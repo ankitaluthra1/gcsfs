@@ -101,9 +101,6 @@ class PrefetchProducer:
     # to maximum of 2 * io_size and 128MB
     MIN_PREFETCH_SIZE = 128 * 1024 * 1024
 
-    # The prefetching starts on the third read.
-    MIN_STREAKS_FOR_PREFETCHING = 3
-
     def __init__(
         self,
         fetcher,
@@ -251,15 +248,7 @@ class PrefetchProducer:
 
                 io_size = self.get_io_size()
                 streak = self.get_sequential_streak()
-
-                if streak < self.MIN_STREAKS_FOR_PREFETCHING:
-                    prefetch_multiplier = 1
-                else:
-                    prefetch_multiplier = streak - self.MIN_STREAKS_FOR_PREFETCHING + 1
-
-                prefetch_size = min(
-                    prefetch_multiplier * io_size, self.max_prefetch_size
-                )
+                prefetch_size = min((streak + 1) * io_size, self.max_prefetch_size)
 
                 logger.debug(
                     "Producer awake. Current offset: %d, User offset: %d, Prefetch size: %d",
@@ -419,10 +408,7 @@ class PrefetchConsumer:
                     block = await task
 
                     self.sequential_streak += 1
-                    if (
-                        self.sequential_streak
-                        >= PrefetchProducer.MIN_STREAKS_FOR_PREFETCHING
-                    ):
+                    if self.sequential_streak >= 2:
                         self.wakeup_event.set()
 
                     self._current_block = block
