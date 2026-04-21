@@ -474,6 +474,34 @@ class TestExtendedGcsFileSystemMv:
             mocks["control_client"].rename_folder.assert_not_called()
             mocks["super_mv"].assert_not_called()
 
+    def test_mv_list_fallback_to_super_mv(self, gcs_hns, gcs_hns_mocks):
+        """Test that mv falls back to super_mv if path1 or path2 is a list."""
+        gcsfs = gcs_hns
+        path1 = [f"{TEST_HNS_BUCKET}/file1.txt", f"{TEST_HNS_BUCKET}/file2.txt"]
+        path2 = f"{TEST_HNS_BUCKET}/new_dir/"
+
+        with gcs_hns_mocks(BucketType.HIERARCHICAL, gcsfs) as mocks:
+            gcsfs.mv(path1, path2)
+
+            mocks["async_lookup_bucket_type"].assert_not_called()
+            mocks["info"].assert_not_called()
+            mocks["control_client"].rename_folder.assert_not_called()
+            mocks["super_mv"].assert_called_once_with(path1, path2)
+
+    def test_mv_glob_fallback_to_super_mv(self, gcs_hns, gcs_hns_mocks):
+        """Test that mv falls back to super_mv if path1 contains glob magic characters."""
+        gcsfs = gcs_hns
+        path1 = f"{TEST_HNS_BUCKET}/*.txt"
+        path2 = f"{TEST_HNS_BUCKET}/new_dir/"
+
+        with gcs_hns_mocks(BucketType.HIERARCHICAL, gcsfs) as mocks:
+            gcsfs.mv(path1, path2)
+
+            mocks["async_lookup_bucket_type"].assert_not_called()
+            mocks["info"].assert_not_called()
+            mocks["control_client"].rename_folder.assert_not_called()
+            mocks["super_mv"].assert_called_once_with(path1, path2)
+
     def test_hns_rename_fails_if_parent_dne(self, gcs_hns, gcs_hns_mocks):
         """Test that HNS rename fails if the destination's parent does not exist."""
         gcsfs = gcs_hns
