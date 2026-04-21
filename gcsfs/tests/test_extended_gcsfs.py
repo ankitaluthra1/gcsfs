@@ -1242,11 +1242,11 @@ async def test_concurrent_mrd_fetch_success(extended_gcsfs):
     mock_mrd.download_ranges.side_effect = fake_download
 
     result = await extended_gcsfs._concurrent_mrd_fetch(
-        offset=0, length=1024, concurrency=4, mrd_or_pool=mock_pool
+        offset=0, length=5 * 1024 * 1024, concurrency=4, mrd_or_pool=mock_pool
     )
 
-    assert len(result) == 1024
-    assert result == b"A" * 1024
+    assert len(result) == 5 * 1024 * 1024
+    assert result == b"A" * 5 * 1024 * 1024
     assert mock_mrd.download_ranges.call_count == 4
 
 
@@ -1277,7 +1277,7 @@ async def test_concurrent_mrd_fetch_exception_masking(extended_gcsfs):
 
     with pytest.raises(DataCorruption, match="Simulated Network Drop"):
         await extended_gcsfs._concurrent_mrd_fetch(
-            offset=0, length=1024, concurrency=4, mrd_or_pool=mock_pool
+            offset=0, length=5 * 1024 * 1024, concurrency=4, mrd_or_pool=mock_pool
         )
 
 

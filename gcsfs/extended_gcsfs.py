@@ -359,6 +359,9 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
     async def _concurrent_mrd_fetch(self, offset, length, concurrency, mrd_or_pool):
         """Helper to handle concurrent chunk downloads into a DirectMemmoveBuffer."""
+        concurrency = (
+            concurrency if length >= self.MIN_CHUNK_SIZE_FOR_CONCURRENCY else 1
+        )
         result_bytes = PyBytes_FromStringAndSize(None, length)
         buffer_ptr = PyBytes_AsString(result_bytes)
 
