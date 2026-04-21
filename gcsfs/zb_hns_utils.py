@@ -251,7 +251,17 @@ class DirectMemmoveBuffer:
             if self._pending_count == 0:
                 self._done_event.clear()
             self._pending_count += 1
-        return self.executor.submit(self._do_memmove, dest, data_bytes, size)
+
+        try:
+            return self.executor.submit(self._do_memmove, dest, data_bytes, size)
+        except BaseException as e:
+            self._error = e
+            self.semaphore.release()
+            with self._lock:
+                self._pending_count -= 1
+                if self._pending_count == 0:
+                    self._done_event.set()
+            raise e
 
     def _do_memmove(self, dest, data_bytes, size):
         try:

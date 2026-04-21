@@ -545,3 +545,37 @@ async def test_mrd_pool_round_robin_multi_request(mock_gcsfs):
                 async with pool.get_mrd() as shared_mrd3:
                     assert shared_mrd3 == mrd1
                     assert pool._rr_index == 1
+
+
+@mock.patch("gcsfs.zb_hns_utils.ctypes.memmove")
+def test_direct_memmove_buffer_submit_failure(mock_memmove):
+    """
+    Tests that if executor.submit fails synchronously (e.g., executor is closed),
+    the internal locks, semaphores, and events are properly reset, and close()
+    does not hang.
+    """
+    size = 10
+    buffer_array = (ctypes.c_char * size)()
+    start_address = ctypes.addressof(buffer_array)
+    end_address = start_address + size
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    buf = DirectMemmoveBuffer(start_address, end_address, executor, max_pending=2)
+
+    # Mock the submit method to simulate a closed executor throwing a RuntimeError
+    with mock.patch.object(
+        executor, "submit", side_effect=RuntimeError("Executor closed")
+    ):
+        # The write operation should raise the simulated RuntimeError
+        with pytest.raises(RuntimeError, match="Executor closed"):
+            buf.write(b"12345")
+
+    # Verify that the internal tracking state was correctly rolled back
+    assert buf._pending_count == 0
+    assert buf._done_event.is_set()
+
+    # Calling close() should NOT hang. It should immediately raise the stored error.
+    with pytest.raises(RuntimeError, match="Executor closed"):
+        buf.close()
+
+    executor.shutdown()
