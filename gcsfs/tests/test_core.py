@@ -1290,6 +1290,43 @@ def test_get_put_file_in_dir(protocol, gcs):
 
 
 @pytest.mark.parametrize("protocol", ["", "gs://", "gcs://"])
+def test_put_file_resumable_upload_cleanup_on_chunk_failure(protocol, gcs):
+    rpath = protocol + TEST_BUCKET + "/resumable_cleanup_test"
+    location = (
+        "https://storage.googleapis.com/upload/storage/v1/b/"
+        f"{TEST_BUCKET}/o?uploadType=resumable&upload_id=abc123"
+        "&ifGenerationMatch=0"
+    )
+    expected_cleanup_url = location.replace("&ifGenerationMatch=0", "")
+    chunk_error = RuntimeError("chunk upload exploded")
+    payload = b"x" * (5 * 2**20)
+
+    with tmpfile() as lpath:
+        with open(lpath, "wb") as f:
+            f.write(payload)
+
+        with (
+            mock.patch(
+                "gcsfs.core.initiate_upload",
+                new_callable=mock.AsyncMock,
+                return_value=location,
+            ) as mock_init,
+            mock.patch(
+                "gcsfs.core.upload_chunk",
+                new_callable=mock.AsyncMock,
+                side_effect=chunk_error,
+            ) as mock_chunk,
+            mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call,
+        ):
+            with pytest.raises(RuntimeError, match="chunk upload exploded"):
+                gcs.put_file(lpath, rpath)
+
+            mock_init.assert_awaited_once()
+            mock_chunk.assert_awaited()
+            mock_call.assert_awaited_once_with("DELETE", expected_cleanup_url)
+
+
+@pytest.mark.parametrize("protocol", ["", "gs://", "gcs://"])
 def test_get_file_to_current_working_directory(monkeypatch, protocol, gcs):
     fn = protocol + TEST_BUCKET + "/temp"
     gcs.pipe(fn, b"hello world")
