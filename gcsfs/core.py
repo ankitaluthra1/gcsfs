@@ -1501,7 +1501,7 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                     if msg and msg2:
                         out.append(OSError(msg2.groups()[0]))
                     else:
-                        out.append(OSError(str(path, code)))
+                        out.append(OSError(f"{path}: {code}"))
             if remaining:
                 paths = remaining
                 await asyncio.sleep(min(random.random() + 2 ** (retry - 1), 32))
