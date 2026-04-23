@@ -119,6 +119,7 @@ case "$TEST_SUITE" in
     # - test_mv_file_cache: Integration test only applicable for regional buckets.
     # - test_rm_wildcards_non_recursive: HNS buckets have different behavior for non-recursive wildcard deletion.
     # - test_write_x_mpu fails because zonal files do not support x mode.
+    # - test_put_file_resumable_upload_cleanup_on_chunk_failure: Zonal uploads use gRPC and bypass upload_chunk, so mock is not triggered.
     ZONAL_DESELECTS+=(
       "--deselect=gcsfs/tests/test_core.py::test_flush"
       "--deselect=gcsfs/tests/test_core.py::test_write_blocks"
@@ -129,6 +130,7 @@ case "$TEST_SUITE" in
       "--deselect=gcsfs/tests/test_core.py::test_mv_file_cache"
       "--deselect=gcsfs/tests/test_core.py::test_rm_wildcards_non_recursive"
       "--deselect=gcsfs/tests/test_core.py::test_write_x_mpu"
+      "--deselect=gcsfs/tests/test_core.py::test_put_file_resumable_upload_cleanup_on_chunk_failure"
     )
 
     # The prefetcher engine is not integrated for zonal in this bucket.

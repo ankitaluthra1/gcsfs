@@ -1752,7 +1752,7 @@ class GCSFileSystem(asyn.AsyncFileSystem):
                 except Exception:
                     await self._call(
                         "DELETE",
-                        self.location.replace("&ifGenerationMatch=0", ""),
+                        location.replace("&ifGenerationMatch=0", ""),
                     )
                     raise
 
