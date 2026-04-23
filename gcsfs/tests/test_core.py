@@ -466,12 +466,12 @@ async def test_rm_batch_error(gcs):
         f"--{boundary}--\n"
     ).encode()
     mock_headers = {"Content-Type": f"multipart/mixed; boundary={boundary}"}
-    
+
     with mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call:
         mock_call.return_value = (mock_headers, mock_response_content)
-        
+
         out = await gcs._rm_files([path])
-        
+
         assert len(out) == 1
         assert isinstance(out[0], OSError)
         assert f"{path}: 400" in str(out[0])
