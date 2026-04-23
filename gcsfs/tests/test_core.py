@@ -451,6 +451,32 @@ def test_rm_batch(gcs):
     assert b not in gcs.find(TEST_BUCKET)
 
 
+@pytest.mark.asyncio
+async def test_rm_batch_error(gcs):
+    path = TEST_BUCKET + "/test_error_file"
+    boundary = "==========7330845974216740156=="
+    mock_response_content = (
+        f"\n--{boundary}\n"
+        "Content-Type: application/http\n"
+        "\n"
+        "HTTP/1.1 400 Bad Request\n"
+        "Content-Type: text/plain\n"
+        "\n"
+        "Error without braces\n"
+        f"--{boundary}--\n"
+    ).encode()
+    mock_headers = {"Content-Type": f"multipart/mixed; boundary={boundary}"}
+
+    with mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call:
+        mock_call.return_value = (mock_headers, mock_response_content)
+
+        out = await gcs._rm_files([path])
+
+        assert len(out) == 1
+        assert isinstance(out[0], OSError)
+        assert f"{path}: 400" in str(out[0])
+
+
 def test_rm_recursive(gcs):
     files = ["/a", "/a/b", "/a/c"]
     for fn in files:
