@@ -154,11 +154,29 @@ class ZonalFile(GCSFile):
                 self.flush_interval_bytes,
             )
 
-    def _fetch_range(self, start=None, end=None, chunk_lengths=None):
+    def _fetch_range(
+        self,
+        start: int | None = None,
+        end: int | None = None,
+        chunk_lengths: list[int] | None = None,
+    ):
         """
         Overrides the default _fetch_range to implement the gRPC read path.
 
-        See super() class for documentation.
+        Args:
+            start: The start offset for requested bytes (included).
+            end: The end offset for requested bytes (excluded).
+            chunk_lengths: A list of integers specifying the sizes of sequential chunks to read
+                starting from the start offset. This cannot be used at the same time as the end parameter.
+
+        Returns:
+            A single bytes object if chunk_lengths is None, or a list of bytes objects corresponding
+            to the requested chunk sizes. If the range cannot be satisfied, it returns empty bytes
+            or a list with empty bytes.
+
+        Raises:
+            ValueError: If both end and chunk_lengths are provided.
+            RuntimeError: If an underlying fetch operation fails for an unexpected reason.
         """
         if end is not None and chunk_lengths is not None:
             raise ValueError(
@@ -166,6 +184,9 @@ class ZonalFile(GCSFile):
             )
 
         if self._prefetch_engine:
+            # This block is basically where caches and prefetch engines may overlap.
+            # We plan to remove this behaviour in future.
+
             try:
                 if chunk_lengths is None:
                     return self._prefetch_engine._fetch(start, end)
@@ -188,6 +209,7 @@ class ZonalFile(GCSFile):
                     return b"" if chunk_lengths is None else [b""]
                 raise
 
+        # non-prefetch route
         async def _do_fetch():
             if chunk_lengths is not None:
                 return await self.gcsfs._fetch_range_split(
@@ -356,7 +378,7 @@ class ZonalFile(GCSFile):
         # super is closed before aaow since flush may need aaow
         super().close()
 
-        if hasattr(self, "mrd_pool"):
+        if hasattr(self, "mrd_pool") and self.mrd_pool:
             asyn.sync(self.gcsfs.loop, self.mrd_pool.close)
 
         # Only close aaow if the stream is open

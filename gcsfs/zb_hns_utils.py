@@ -197,20 +197,35 @@ class DirectMemmoveBuffer:
             end_address (int): The absolute ending memory address. Writes exceeding
                 this boundary will be rejected to prevent overflows.
             executor (concurrent.futures.Executor): The thread pool executor to run the
-                memmove operations.
+                memmove operations. The lifecycle of this executor is managed by the caller.
             max_pending (int, optional): The maximum number of pending write operations
                 allowed in the queue. Defaults to 5.
         """
         self.start_address = start_address
         self.end_address = end_address
+        self.executor = executor
+
+        # Volatile state variables. Must only be amended while holding self._lock.
         self.current_offset = 0
-        self.semaphore = threading.Semaphore(max_pending)
-        self._error = None
         self._pending_count = 0
+        self._error = None
+
+        # Primitives:
+        # 1. semaphore: Provides backpressure by limiting the number of active tasks.
+        # 2. _lock: Protects mutations to the volatile state variables above.
+        # 3. _done_event: Signals when the queue of active background tasks reaches zero.
+        self.semaphore = threading.Semaphore(max_pending)
         self._lock = threading.Lock()
         self._done_event = threading.Event()
         self._done_event.set()
-        self.executor = executor
+
+    def _decrement_pending(self):
+        """Helper to cleanly release concurrency primitives after a task finishes."""
+        self.semaphore.release()
+        with self._lock:
+            self._pending_count -= 1
+            if self._pending_count == 0:
+                self._done_event.set()
 
     def write(self, data):
         """
@@ -221,7 +236,7 @@ class DirectMemmoveBuffer:
         pending operations reaches `max_pending`.
 
         Args:
-            data (bytes): The data to be written to memory.
+            data: The data to be written to memory. Must support the buffer protocol.
 
         Returns:
             concurrent.futures.Future: A future object representing the execution of the
@@ -229,9 +244,11 @@ class DirectMemmoveBuffer:
 
         Raises:
             Exception: If any previous asynchronous write operation encountered an error.
+            BufferError: If the write exceeds the allocated memory boundaries.
         """
         if self._error:
             raise self._error
+
         size = len(data)
         with self._lock:
             dest = self.start_address + self.current_offset
@@ -256,11 +273,7 @@ class DirectMemmoveBuffer:
             return self.executor.submit(self._do_memmove, dest, data_bytes, size)
         except BaseException as e:
             self._error = e
-            self.semaphore.release()
-            with self._lock:
-                self._pending_count -= 1
-                if self._pending_count == 0:
-                    self._done_event.set()
+            self._decrement_pending()
             raise e
 
     def _do_memmove(self, dest, data_bytes, size):
@@ -270,11 +283,7 @@ class DirectMemmoveBuffer:
             self._error = e
             raise e
         finally:
-            self.semaphore.release()
-            with self._lock:
-                self._pending_count -= 1
-                if self._pending_count == 0:
-                    self._done_event.set()
+            self._decrement_pending()
 
     def close(self):
         """
@@ -284,6 +293,7 @@ class DirectMemmoveBuffer:
 
         Raises:
             Exception: If any background write operation failed during execution.
+            BufferError: If the buffer was not filled to the expected capacity.
         """
         self._done_event.wait()
         if self._error:

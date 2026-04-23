@@ -292,7 +292,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         **kwargs,
     ):
         """
-        Reading multiple disjoint ranges concurrently.
+        Reading multiple adjacent ranges concurrently.
 
         Delegates concurrent fetching of individual chunks directly to `_cat_file`.
         """
@@ -320,8 +320,8 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             await mrd.initialize()
             pool_created_here = True
 
+        tasks = []
         try:
-            tasks = []
             current_offset = start_offset
 
             cat_kwargs = kwargs.copy()
@@ -335,6 +335,10 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                             start=current_offset,
                             end=end_offset,
                             mrd=mrd,
+                            # Distribute the concurrency budget proportionally.
+                            # Since these outer tasks are already concurrent, this is typically 1.
+                            # However, if a large chunk dominates the total size, it receives
+                            # higher concurrency to prevent it from becoming a bottleneck.
                             concurrency=max(
                                 1, length * concurrency // sum(chunk_lengths)
                             ),
@@ -352,7 +356,12 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                     raise res
 
             return results
-
+        except BaseException:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
         finally:
             if pool_created_here:
                 await mrd.close()
@@ -373,7 +382,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         # Track if the core download process failed
         has_error = False
 
-        async def _download(o, s, b):
+        async def _download(o, s, b, mrd_or_pool):
             async with _get_mrd_from_pool_or_mrd(mrd_or_pool) as m_client:
                 await m_client.download_ranges([(o, s, b)])
 
@@ -388,7 +397,11 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 self._memmove_executor,
             )
             buffers.append(buf)
-            tasks.append(asyncio.create_task(_download(part_offset, actual_size, buf)))
+            tasks.append(
+                asyncio.create_task(
+                    _download(part_offset, actual_size, buf, mrd_or_pool)
+                )
+            )
 
         try:
             results = await asyncio.gather(*tasks, return_exceptions=True)
