@@ -26,7 +26,7 @@ classifiers = [
 dependencies = [
     "aiohttp!=4.0.0a0,!=4.0.0a1,>=3.9.0",
     "decorator>4.1.2",
-    "fsspec==2026.3.0",
+    "fsspec>=2026.3.0",
     "google-auth>=1.2",
     "google-auth-oauthlib",
     "google-cloud-storage>=3.9.0",
@@ -37,20 +37,14 @@ dependencies = [
 [project.optional-dependencies]
 gcsfuse = ["fusepy"]
 crc = ["crcmod"]
-test = [
+dev = [
+    "flake8",
+    "isort",
     "pytest",
     "pytest-asyncio",
     "pytest-timeout",
     "pytest-cov",
     "pytest-subtests",
-    "requests",
-]
-dev = [
-    "build",
-    "hatchling",
-    "hatch-vcs",
-    "flake8",
-    "isort",
 ]
 
 [project.urls]
