@@ -25,7 +25,7 @@ def _info_op(gcs, path, pattern="info"):
     except FileNotFoundError:
         pass
     duration_ms = (time.perf_counter() - start_time) * 1000
-    logging.info(f"{pattern.upper()} : {path} - {duration_ms:.2f} ms.")
+    logging.debug(f"{pattern.upper()} : {path} - {duration_ms:.2f} ms.")
 
 
 def _info_ops(gcs, paths, pattern="info"):
@@ -71,12 +71,15 @@ def test_info_multi_threaded(benchmark, gcsfs_benchmark_info, monitor):
 
     paths = _get_target_paths(target_dirs, file_paths, params)
 
+    chunks = _chunk_list(paths, params.threads)
+    args_list = [(gcs, chunks[i], params.pattern) for i in range(params.threads)]
+
     run_multi_threaded(
         benchmark,
         monitor,
         params,
         _info_ops,
-        (gcs, paths, params.pattern),
+        args_list,
         BENCHMARK_GROUP,
     )
 
@@ -123,9 +126,8 @@ def test_info_multi_process(
 ):
     gcs, target_dirs, file_paths, prefix, params = gcsfs_benchmark_info
 
-    chunks = _chunk_list(
-        _get_target_paths(target_dirs, file_paths, params), params.processes
-    )
+    paths = _get_target_paths(target_dirs, file_paths, params)
+    chunks = _chunk_list(paths, params.processes)
 
     def args_builder(gcs_instance, i, shared_arr):
         return (
