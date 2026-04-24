@@ -2180,116 +2180,94 @@ def test_mv_file_raises_error_for_specific_generation(gcs):
 
 
 @pytest.mark.asyncio
-async def test_info_bucket_optimization(gcs):
-    bucket = "test-bucket"
-
-    # Mock _call to fail with OSError on GET b/test-bucket
-    # and mock _ls to return a list
-    with mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call:
-        mock_call.side_effect = OSError("Failed to GET bucket")
-        with mock.patch.object(gcs, "_ls", new_callable=mock.AsyncMock) as mock_ls:
-            mock_ls.return_value = ["test-bucket/"]
-
-            # Use await gcs._info as it is an async method
-            info = await gcs._info(bucket)
-
-            # Verify _call was called for the bucket GET
-            mock_call.assert_called_with("GET", f"b/{bucket}", json_out=True)
-
-            # Verify _ls was called with max_results=1
-            mock_ls.assert_awaited_once_with(bucket, max_results=1)
-
-            assert info == {"name": bucket, "size": 0, "type": "directory"}
-
-
-@pytest.mark.asyncio
-async def test_info_bucket_not_found_optimization(gcs):
-    bucket = "non-existent-bucket"
-
-    with mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call:
-        mock_call.side_effect = OSError("Failed to GET bucket")
-        with mock.patch.object(gcs, "_ls", new_callable=mock.AsyncMock) as mock_ls:
-            mock_ls.return_value = []
-
-            with pytest.raises(FileNotFoundError):
-                await gcs._info(bucket)
-
-            mock_ls.assert_awaited_once_with(bucket, max_results=1)
-
-
-@pytest.mark.asyncio
-async def test_info_bucket_success_parallel(gcs):
-    bucket = "test-bucket"
-
-    with mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call:
-        mock_call.return_value = {"name": bucket, "kind": "storage#bucket"}
-        with mock.patch.object(gcs, "_ls", new_callable=mock.AsyncMock) as mock_ls:
-            mock_ls.return_value = ["test-bucket/"]
-
-            info = await gcs._info(bucket)
-
-            mock_call.assert_called_with("GET", f"b/{bucket}", json_out=True)
-            mock_ls.assert_awaited_once_with(bucket, max_results=1)
-
-            assert info == {
-                "name": bucket,
+@pytest.mark.parametrize(
+    "bucket, call_effect, ls_effect, expected_result, expected_exception, exception_match",
+    [
+        (
+            "test-bucket",
+            OSError("Failed to GET bucket"),
+            ["test-bucket/"],
+            {"name": "test-bucket", "size": 0, "type": "directory"},
+            None,
+            None,
+        ),
+        (
+            "non-existent-bucket",
+            OSError("Failed to GET bucket"),
+            [],
+            None,
+            FileNotFoundError,
+            None,
+        ),
+        (
+            "test-bucket",
+            {"name": "test-bucket", "kind": "storage#bucket"},
+            ["test-bucket/"],
+            {
+                "name": "test-bucket",
                 "kind": "storage#bucket",
                 "size": 0,
                 "type": "directory",
-            }
-
-
-@pytest.mark.asyncio
-async def test_info_bucket_ls_exception(gcs):
-    bucket = "test-bucket"
-
+            },
+            None,
+            None,
+        ),
+        (
+            "test-bucket",
+            OSError("Failed to GET bucket"),
+            ValueError("LS error"),
+            None,
+            ValueError,
+            "LS error",
+        ),
+        (
+            "test-bucket",
+            ValueError("Some other error"),
+            ["test-bucket/"],
+            None,
+            ValueError,
+            "Some other error",
+        ),
+        (
+            "test-bucket",
+            OSError("Access denied"),
+            ["test-bucket/some-file"],
+            {"name": "test-bucket", "size": 0, "type": "directory"},
+            None,
+            None,
+        ),
+    ],
+)
+async def test_info_bucket_behavior(
+    gcs,
+    bucket,
+    call_effect,
+    ls_effect,
+    expected_result,
+    expected_exception,
+    exception_match,
+):
     with mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call:
-        mock_call.side_effect = OSError("Failed to GET bucket")
-        with mock.patch.object(gcs, "_ls", new_callable=mock.AsyncMock) as mock_ls:
-            mock_ls.side_effect = ValueError("LS error")
+        if isinstance(call_effect, Exception):
+            mock_call.side_effect = call_effect
+        else:
+            mock_call.return_value = call_effect
 
-            with pytest.raises(ValueError, match="LS error"):
-                await gcs._info(bucket)
+        with mock.patch.object(gcs, "_ls", new_callable=mock.AsyncMock) as mock_ls:
+            if isinstance(ls_effect, Exception):
+                mock_ls.side_effect = ls_effect
+            else:
+                mock_ls.return_value = ls_effect
+
+            if expected_exception:
+                with pytest.raises(expected_exception, match=exception_match):
+                    await gcs._info(bucket)
+            else:
+                info = await gcs._info(bucket)
+                assert info == expected_result
 
             mock_call.assert_called_with("GET", f"b/{bucket}", json_out=True)
             mock_ls.assert_awaited_once_with(bucket, max_results=1)
-
-
-@pytest.mark.asyncio
-async def test_info_bucket_other_exception(gcs):
-    bucket = "test-bucket"
-
-    with mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call:
-        mock_call.side_effect = ValueError("Some other error")
-        with mock.patch.object(gcs, "_ls", new_callable=mock.AsyncMock) as mock_ls:
-            mock_ls.return_value = ["test-bucket/"]
-
-            with pytest.raises(ValueError, match="Some other error"):
-                await gcs._info(bucket)
-
-            mock_call.assert_called_with("GET", f"b/{bucket}", json_out=True)
-            mock_ls.assert_awaited_once_with(bucket, max_results=1)
-
-
-@pytest.mark.asyncio
-async def test_info_bucket_fallback_success(gcs):
-    bucket = "test-bucket"
-
-    with mock.patch.object(gcs, "_call", new_callable=mock.AsyncMock) as mock_call:
-        mock_call.side_effect = OSError("Access denied")
-        with mock.patch.object(gcs, "_ls", new_callable=mock.AsyncMock) as mock_ls:
-            mock_ls.return_value = ["test-bucket/some-file"]
-
-            info = await gcs._info(bucket)
-
-            mock_call.assert_called_with("GET", f"b/{bucket}", json_out=True)
-            mock_ls.assert_awaited_once_with(bucket, max_results=1)
-
-            assert info == {
-                "name": bucket,
-                "size": 0,
-                "type": "directory",
-            }
 
 
 def test_cat_file_routing_and_thresholds(gcs):
