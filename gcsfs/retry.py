@@ -210,14 +210,12 @@ def _is_transient_exception(exception):
     is_transient = isinstance(
         exception,
         (
-            api_exceptions.RetryError,
             api_exceptions.DeadlineExceeded,
             api_exceptions.ServiceUnavailable,
             api_exceptions.InternalServerError,
             api_exceptions.TooManyRequests,
             api_exceptions.ResourceExhausted,
             api_exceptions.Unknown,
-            asyncio.TimeoutError,
         ),
     )
     if (
