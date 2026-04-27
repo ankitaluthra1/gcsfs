@@ -20,11 +20,13 @@ from google.cloud.storage.asyncio.async_grpc_client import AsyncGrpcClient
 from gcsfs import __version__ as version
 from gcsfs import zb_hns_utils
 from gcsfs.core import GCSFile, GCSFileSystem
+from gcsfs.retry import StorageControlRetryConfig, get_storage_control_retry_config
 from gcsfs.zonal_file import ZonalFile
 
 logger = logging.getLogger("gcsfs")
 
 USER_AGENT = "python-gcsfs"
+STORAGE_CONTROL_RPC_TIMEOUT = 30.0
 
 
 class BucketType(Enum):
@@ -51,6 +53,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
     """
 
     def __init__(self, *args, finalize_on_close=False, **kwargs):
+        self.retry_config = StorageControlRetryConfig.from_kwargs(**kwargs)
         super().__init__(*args, **kwargs)
         # By default, files in zonal buckets are left unfinalized to allow appends.
         self.finalize_on_close = finalize_on_close
@@ -78,6 +81,9 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 else self.project
             )
         return None
+
+    def _get_retry_config(self, **kwargs):
+        return get_storage_control_retry_config(self.retry_config, **kwargs)
 
     @property
     def grpc_client(self):
@@ -141,7 +147,11 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             client = await self._get_control_plane_client()
             bucket_name_value = f"projects/_/buckets/{bucket}/storageLayout"
             logger.debug(f"get_storage_layout request for name: {bucket_name_value}")
-            response = await client.get_storage_layout(name=bucket_name_value)
+            response = await client.get_storage_layout(
+                name=bucket_name_value,
+                retry=self._get_retry_config(),
+                timeout=STORAGE_CONTROL_RPC_TIMEOUT,
+            )
 
             if response.location_type == "zone":
                 return BucketType.ZONAL_HIERARCHICAL
@@ -514,7 +524,11 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
                 logger.debug(f"rename_folder request: {request}")
                 client = await self._get_control_plane_client()
-                operation = await client.rename_folder(request=request)
+                operation = await client.rename_folder(
+                    request=request,
+                    retry=self._get_retry_config(),
+                    timeout=STORAGE_CONTROL_RPC_TIMEOUT,
+                )
                 await operation.result()
                 self._update_dircache_after_rename(path1, path2)
 
@@ -679,7 +693,11 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         try:
             logger.debug(f"create_folder request: {request}")
             client = await self._get_control_plane_client()
-            await client.create_folder(request=request)
+            await client.create_folder(
+                request=request,
+                retry=self._get_retry_config(),
+                timeout=STORAGE_CONTROL_RPC_TIMEOUT,
+            )
             # Instead of invalidating the parent cache, update it to add the new entry.
             parent_path = self._parent(path)
             if parent_path in self.dircache:
@@ -725,7 +743,11 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
                 # Verify existence using get_folder API
                 client = await self._get_control_plane_client()
-                response = await client.get_folder(request=request)
+                response = await client.get_folder(
+                    request=request,
+                    retry=self._get_retry_config(),
+                    timeout=STORAGE_CONTROL_RPC_TIMEOUT,
+                )
 
                 # If successful, return directory metadata
                 return {
@@ -798,7 +820,11 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
             logger.debug(f"delete_folder request: {request}")
             client = await self._get_control_plane_client()
-            await client.delete_folder(request=request)
+            await client.delete_folder(
+                request=request,
+                retry=self._get_retry_config(),
+                timeout=STORAGE_CONTROL_RPC_TIMEOUT,
+            )
 
             # Remove the directory from the cache and from its parent's listing.
             self.dircache.pop(path, None)
@@ -1121,7 +1147,11 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         logger.debug(f"list_folders request: {request}")
 
         client = await self._get_control_plane_client()
-        async for folder in await client.list_folders(request=request):
+        async for folder in await client.list_folders(
+            request=request,
+            retry=self._get_retry_config(),
+            timeout=STORAGE_CONTROL_RPC_TIMEOUT,
+        ):
             folders.append(self._create_folder_entry(bucket, folder))
 
         return folders

@@ -2,13 +2,41 @@ import asyncio
 import json
 import logging
 import random
+from dataclasses import dataclass
 
 import aiohttp.client_exceptions
 import google.auth.exceptions
 import requests.exceptions
 from decorator import decorator
+from google.api_core import exceptions as api_exceptions
+from google.api_core.retry import AsyncRetry
 
 logger = logging.getLogger("gcsfs")
+
+DEFAULT_RETRY_TIMEOUT = 60.0
+DEFAULT_RETRY_INITIAL = 1.0
+DEFAULT_RETRY_MAXIMUM = 60.0
+DEFAULT_RETRY_MULTIPLIER = 2.0
+
+
+@dataclass
+class StorageControlRetryConfig:
+    """Holds retry configuration for Storage Control API calls."""
+
+    timeout: float = None
+    initial: float = None
+    maximum: float = None
+    multiplier: float = None
+
+    @classmethod
+    def from_kwargs(cls, **kwargs):
+        """Creates a config from kwargs, filtering for retry_ prefix."""
+        return cls(
+            timeout=kwargs.get("retry_timeout"),
+            initial=kwargs.get("retry_initial"),
+            maximum=kwargs.get("retry_maximum"),
+            multiplier=kwargs.get("retry_multiplier"),
+        )
 
 
 class HttpError(Exception):
@@ -176,3 +204,60 @@ async def retry_request(func, retries=6, *args, **kwargs):
                 continue
             logger.exception(f"{func.__name__} non-retriable exception: {e}")
             raise e
+
+
+def _is_transient_exception(exception):
+    is_transient = isinstance(
+        exception,
+        (
+            api_exceptions.RetryError,
+            api_exceptions.DeadlineExceeded,
+            api_exceptions.ServiceUnavailable,
+            api_exceptions.InternalServerError,
+            api_exceptions.TooManyRequests,
+            api_exceptions.ResourceExhausted,
+            api_exceptions.Unknown,
+            asyncio.TimeoutError,
+        ),
+    )
+    if (
+        not is_transient
+        and isinstance(exception, api_exceptions.Unauthenticated)
+        and "Invalid Credentials" in str(exception)
+    ):
+        is_transient = True
+    return is_transient
+
+
+def get_storage_control_retry_config(base_config=None, **kwargs) -> AsyncRetry:
+    """
+    Returns an AsyncRetry object configured for Storage Control API calls.
+
+    Priority: kwargs (retry_timeout, etc.) > base_config > package defaults.
+
+    Args:
+        base_config: A StorageControlRetryConfig instance containing base settings.
+        **kwargs: Direct call-site overrides (e.g., retry_timeout=10).
+    """
+    overrides = StorageControlRetryConfig.from_kwargs(**kwargs)
+
+    def _resolve(attr):
+        # 1. Check explicit call-site overrides
+        val = getattr(overrides, attr, None)
+        if val is not None:
+            return val
+        # 2. Check base filesystem configuration
+        if base_config:
+            val = getattr(base_config, attr, None)
+            if val is not None:
+                return val
+        # 3. Fallback to package defaults
+        return globals()[f"DEFAULT_RETRY_{attr.upper()}"]
+
+    return AsyncRetry(
+        predicate=_is_transient_exception,
+        initial=_resolve("initial"),
+        maximum=_resolve("maximum"),
+        multiplier=_resolve("multiplier"),
+        timeout=_resolve("timeout"),
+    )
