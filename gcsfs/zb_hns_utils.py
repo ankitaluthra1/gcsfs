@@ -363,12 +363,13 @@ class MRDPool:
             if self._closed:
                 raise RuntimeError("Cannot initialize a closed MRDPool.")
 
-            if not self._initialized:
+            if not self._initialized and self._active_count == 0:
                 mrd = await self._create_mrd()
                 self.persisted_size = mrd.persisted_size
                 self._free_mrds.put_nowait(mrd)
                 self._active_count += 1
-                self._initialized = True
+
+            self._initialized = True
 
     @contextlib.asynccontextmanager
     async def get_mrd(self):
@@ -385,7 +386,7 @@ class MRDPool:
         Raises:
             Exception: Bubbles up any exceptions encountered during MRD creation.
         """
-        spawn_new = False
+        create_new = False
         used_from_queue = False
         mrd = None
 
@@ -396,13 +397,14 @@ class MRDPool:
             if self._free_mrds.empty():
                 if self._active_count < self.pool_size:
                     self._active_count += 1
-                    spawn_new = True
+                    create_new = True
                 elif self.mrd_supports_multi_request and self._all_mrds:
                     # Pool is full, queue is empty, and we are allowed to share a busy MRD.
+                    # Get the mrd in round robin fasion.
                     mrd = self._all_mrds[self._rr_index]
                     self._rr_index = (self._rr_index + 1) % len(self._all_mrds)
 
-            if spawn_new:
+            if create_new:
                 try:
                     mrd = await self._create_mrd()
                 except BaseException as e:
@@ -420,7 +422,7 @@ class MRDPool:
             # Only return the MRD to the free queue if we were the ones who took it out
             # or if we just spawned it. This prevents duplicate entries in the queue
             # when multiple concurrent tasks share the same MRD via round-robin.
-            if (spawn_new or used_from_queue) and not self._closed:
+            if (create_new or used_from_queue) and not self._closed:
                 self._free_mrds.put_nowait(mrd)
 
     async def close(self):
