@@ -70,7 +70,7 @@ For HNS buckets, ``ExtendedGcsFileSystem`` utilizes the specialized Storage Cont
 Configuring Retries via fsspec
 ------------------------------
 
-Since ``gcsfs`` integrates with the ``fsspec`` configuration system, these retry parameters can be set using ``fsspec`` [configuration files or environment variables](https://filesystem-spec.readthedocs.io/en/latest/features.html#configuration)
+Since ``gcsfs`` integrates with the ``fsspec`` configuration system, these retry parameters can be set using ``fsspec`` `configuration files or environment variables <https://filesystem-spec.readthedocs.io/en/latest/features.html#configuration>`_
 
 These settings will be automatically picked up by any ``GCSFileSystem`` instance when experimental HNS support is enabled (which is the default).
 
