@@ -2137,9 +2137,9 @@ async def test_get_control_plane_client_quota_project_id(
 
 def test_extended_gcsfs_retry_init():
     fs = ExtendedGcsFileSystem(token="anon", retry_timeout=20.0, retry_initial=4.0)
-    assert fs.retry_config.timeout == 20.0
-    assert fs.retry_config.initial == 4.0
-    assert fs.retry_config.maximum is None
+    assert fs.retry_config["retry_timeout"] == 20.0
+    assert fs.retry_config["retry_initial"] == 4.0
+    assert "retry_maximum" not in fs.retry_config
 
 
 def test_extended_gcsfs_get_retry_config():

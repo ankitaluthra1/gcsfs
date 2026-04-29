@@ -20,7 +20,7 @@ from google.cloud.storage.asyncio.async_grpc_client import AsyncGrpcClient
 from gcsfs import __version__ as version
 from gcsfs import zb_hns_utils
 from gcsfs.core import GCSFile, GCSFileSystem
-from gcsfs.retry import StorageControlRetryConfig, get_storage_control_retry_config
+from gcsfs.retry import get_storage_control_retry_config
 from gcsfs.zonal_file import ZonalFile
 
 logger = logging.getLogger("gcsfs")
@@ -53,7 +53,9 @@ class ExtendedGcsFileSystem(GCSFileSystem):
     """
 
     def __init__(self, *args, finalize_on_close=False, **kwargs):
-        self.retry_config = StorageControlRetryConfig.from_kwargs(**kwargs)
+        self.retry_config = {
+            k: v for k, v in kwargs.items() if k.startswith("retry_") and v is not None
+        }
         super().__init__(*args, **kwargs)
         # By default, files in zonal buckets are left unfinalized to allow appends.
         self.finalize_on_close = finalize_on_close

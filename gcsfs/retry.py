@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import random
-from dataclasses import dataclass
 
 import aiohttp.client_exceptions
 import google.auth.exceptions
@@ -18,25 +17,12 @@ DEFAULT_RETRY_INITIAL = 1.0
 DEFAULT_RETRY_MAXIMUM = 60.0
 DEFAULT_RETRY_MULTIPLIER = 2.0
 
-
-@dataclass
-class StorageControlRetryConfig:
-    """Holds retry configuration for Storage Control API calls."""
-
-    timeout: float = None
-    initial: float = None
-    maximum: float = None
-    multiplier: float = None
-
-    @classmethod
-    def from_kwargs(cls, **kwargs):
-        """Creates a config from kwargs, filtering for retry_ prefix."""
-        return cls(
-            timeout=kwargs.get("retry_timeout"),
-            initial=kwargs.get("retry_initial"),
-            maximum=kwargs.get("retry_maximum"),
-            multiplier=kwargs.get("retry_multiplier"),
-        )
+DEFAULT_RETRY_CONFIG = {
+    "retry_timeout": DEFAULT_RETRY_TIMEOUT,
+    "retry_initial": DEFAULT_RETRY_INITIAL,
+    "retry_maximum": DEFAULT_RETRY_MAXIMUM,
+    "retry_multiplier": DEFAULT_RETRY_MULTIPLIER,
+}
 
 
 class HttpError(Exception):
@@ -234,28 +220,22 @@ def get_storage_control_retry_config(base_config=None, **kwargs) -> AsyncRetry:
     Priority: kwargs (retry_timeout, etc.) > base_config > package defaults.
 
     Args:
-        base_config: A StorageControlRetryConfig instance containing base settings.
+        base_config: A dict containing base settings.
         **kwargs: Direct call-site overrides (e.g., retry_timeout=10).
     """
-    overrides = StorageControlRetryConfig.from_kwargs(**kwargs)
+    retry_kwargs = DEFAULT_RETRY_CONFIG.copy()
+    if base_config:
+        retry_kwargs.update(base_config)
 
-    def _resolve(attr):
-        # 1. Check explicit call-site overrides
-        val = getattr(overrides, attr, None)
-        if val is not None:
-            return val
-        # 2. Check base filesystem configuration
-        if base_config:
-            val = getattr(base_config, attr, None)
-            if val is not None:
-                return val
-        # 3. Fallback to package defaults
-        return globals()[f"DEFAULT_RETRY_{attr.upper()}"]
+    overrides = {
+        k: v for k, v in kwargs.items() if k.startswith("retry_") and v is not None
+    }
+    retry_kwargs.update(overrides)
 
     return AsyncRetry(
         predicate=_is_transient_exception,
-        initial=_resolve("initial"),
-        maximum=_resolve("maximum"),
-        multiplier=_resolve("multiplier"),
-        timeout=_resolve("timeout"),
+        initial=retry_kwargs["retry_initial"],
+        maximum=retry_kwargs["retry_maximum"],
+        multiplier=retry_kwargs["retry_multiplier"],
+        timeout=retry_kwargs["retry_timeout"],
     )
