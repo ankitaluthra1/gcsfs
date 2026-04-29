@@ -5,10 +5,10 @@ try:
     from ._version import __version__  # noqa: F401
 except ImportError:
     try:
-        from importlib.metadata import version
+        from importlib.metadata import PackageNotFoundError, version
 
         __version__ = version("gcsfs")
-    except ImportError:
+    except (ImportError, PackageNotFoundError):
         __version__ = "unknown"
 
 logger = logging.getLogger(__name__)
