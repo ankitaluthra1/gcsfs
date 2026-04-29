@@ -6,6 +6,7 @@ try:
 except ImportError:
     try:
         from importlib.metadata import version
+
         __version__ = version("gcsfs")
     except ImportError:
         __version__ = "unknown"
