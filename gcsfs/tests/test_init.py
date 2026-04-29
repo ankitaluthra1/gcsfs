@@ -1,5 +1,6 @@
 import os
 import sys
+from unittest import mock
 
 
 class TestConditionalImport:
@@ -79,35 +80,6 @@ class TestConditionalImport:
             gcsfs, "ExtendedGcsFileSystem"
         ), "ExtendedGcsFileSystem should not be imported directly on gcsfs"
 
-
-from unittest import mock
-
-
-class TestVersionFallback:
-    def setup_method(self):
-        """Setup for each test method."""
-        # Snapshot original gcsfs modules
-        self.original_modules = {
-            name: mod for name, mod in sys.modules.items() if name.startswith("gcsfs")
-        }
-
-        # Unload gcsfs modules to force re-import during the test
-        modules_to_remove = list(self.original_modules.keys())
-        for name in modules_to_remove:
-            if name in sys.modules:
-                del sys.modules[name]
-
-    def teardown_method(self):
-        """Teardown after each test method."""
-        # Clear any gcsfs modules loaded/modified during this test
-        modules_to_remove = [name for name in sys.modules if name.startswith("gcsfs")]
-        for name in modules_to_remove:
-            if name in sys.modules:
-                del sys.modules[name]
-
-        # Restore the original gcsfs modules from the snapshot to avoid side effects
-        sys.modules.update(self.original_modules)
-
     def test_version_exists(self):
         """
         Tests that __version__ is imported correctly
@@ -144,7 +116,7 @@ class TestVersionFallback:
         with mock.patch.dict("sys.modules", {"gcsfs._version": None}):
             # Simulate the package metadata not existing
             with mock.patch(
-                "importlib.metadata.version", side_effect=Exception("Not found")
+                "importlib.metadata.version", side_effect=ImportError("Not found")
             ):
                 import gcsfs
 

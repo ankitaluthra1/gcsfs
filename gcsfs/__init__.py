@@ -6,9 +6,8 @@ try:
 except ImportError:
     try:
         from importlib.metadata import version
-
         __version__ = version("gcsfs")
-    except Exception:
+    except ImportError:
         __version__ = "unknown"
 
 logger = logging.getLogger(__name__)
