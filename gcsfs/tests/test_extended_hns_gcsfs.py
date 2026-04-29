@@ -16,7 +16,7 @@ from google.api_core import exceptions as api_exceptions
 from google.cloud import storage_control_v2
 
 from gcsfs.extended_gcsfs import BucketType, ExtendedGcsFileSystem
-from gcsfs.retry import DEFAULT_RETRY_INITIAL, HttpError
+from gcsfs.retry import DEFAULT_RETRY_CONFIG, HttpError
 from gcsfs.tests.settings import TEST_HNS_BUCKET
 
 REQUIRED_ENV_VAR = "GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT"
@@ -2137,9 +2137,17 @@ async def test_get_control_plane_client_quota_project_id(
 
 def test_extended_gcsfs_retry_init():
     fs = ExtendedGcsFileSystem(token="anon", retry_timeout=20.0, retry_initial=4.0)
-    assert fs.retry_config["retry_timeout"] == 20.0
-    assert fs.retry_config["retry_initial"] == 4.0
-    assert "retry_maximum" not in fs.retry_config
+    assert fs.retry_config["timeout"] == 20.0
+    assert fs.retry_config["initial"] == 4.0
+    assert "maximum" not in fs.retry_config
+
+
+def test_extended_gcsfs_retry_init_invalid_key():
+    fs = ExtendedGcsFileSystem(
+        token="anon", retry_timeout=20.0, retry_invalid_key="value"
+    )
+    assert fs.retry_config["timeout"] == 20.0
+    assert "invalid_key" not in fs.retry_config
 
 
 def test_extended_gcsfs_get_retry_config():
@@ -2148,10 +2156,10 @@ def test_extended_gcsfs_get_retry_config():
     # Test resolution from fs config
     retry = fs._get_retry_config()
     assert retry._timeout == 20.0
-    assert retry._initial == DEFAULT_RETRY_INITIAL
+    assert retry._initial == DEFAULT_RETRY_CONFIG.get("initial")
 
     # Test resolution with call-site override
-    retry_override = fs._get_retry_config(retry_timeout=5.0, retry_initial=2.0)
+    retry_override = fs._get_retry_config(timeout=5.0, initial=2.0)
     assert retry_override._timeout == 5.0
     assert retry_override._initial == 2.0
 

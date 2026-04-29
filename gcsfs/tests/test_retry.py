@@ -8,7 +8,7 @@ import requests
 from requests.exceptions import ProxyError
 
 from gcsfs.retry import (
-    DEFAULT_RETRY_TIMEOUT,
+    DEFAULT_RETRY_CONFIG,
     HttpError,
     get_storage_control_retry_config,
     is_retriable,
@@ -30,19 +30,19 @@ def test_storage_control_retry_config_from_kwargs():
     "kwargs, base_config, expected",
     [
         # 1. Defaults only
-        ({}, None, {"timeout": DEFAULT_RETRY_TIMEOUT}),
+        ({}, None, {"timeout": DEFAULT_RETRY_CONFIG.get("timeout")}),
         # 2. FS Config override
-        ({}, {"retry_timeout": 10.0}, {"timeout": 10.0}),
+        ({}, {"timeout": 10.0}, {"timeout": 10.0}),
         # 3. Call-site override (highest priority)
         (
-            {"retry_timeout": 5.0},
-            {"retry_timeout": 10.0},
+            {"timeout": 5.0},
+            {"timeout": 10.0},
             {"timeout": 5.0},
         ),
         # 4. Partial override (Call-site has timeout, FS has initial)
         (
-            {"retry_timeout": 7.0},
-            {"retry_initial": 2.0},
+            {"timeout": 7.0},
+            {"initial": 2.0},
             {"timeout": 7.0, "initial": 2.0},
         ),
     ],
@@ -61,7 +61,7 @@ from google.api_core import exceptions as api_exceptions
 @pytest.mark.asyncio
 async def test_get_storage_control_retry_config_execution():
     # Create a config with very short delays for testing
-    base_cfg = {"retry_initial": 0.001, "retry_maximum": 0.01}
+    base_cfg = {"initial": 0.001, "maximum": 0.01}
     retry = get_storage_control_retry_config(base_config=base_cfg)
 
     mock_func = mock.AsyncMock()
@@ -83,7 +83,7 @@ async def test_get_storage_control_retry_config_execution():
 
 @pytest.mark.asyncio
 async def test_get_storage_control_retry_config_non_retriable():
-    base_cfg = {"retry_initial": 0.001, "retry_maximum": 0.01}
+    base_cfg = {"initial": 0.001, "maximum": 0.01}
     retry = get_storage_control_retry_config(base_config=base_cfg)
 
     mock_func = mock.AsyncMock()

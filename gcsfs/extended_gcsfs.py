@@ -20,7 +20,7 @@ from google.cloud.storage.asyncio.async_grpc_client import AsyncGrpcClient
 from gcsfs import __version__ as version
 from gcsfs import zb_hns_utils
 from gcsfs.core import GCSFile, GCSFileSystem
-from gcsfs.retry import get_storage_control_retry_config
+from gcsfs.retry import DEFAULT_RETRY_CONFIG, get_storage_control_retry_config
 from gcsfs.zonal_file import ZonalFile
 
 logger = logging.getLogger("gcsfs")
@@ -53,8 +53,25 @@ class ExtendedGcsFileSystem(GCSFileSystem):
     """
 
     def __init__(self, *args, finalize_on_close=False, **kwargs):
+        """
+        Parameters
+        ----------
+        finalize_on_close : bool, default False
+            By default, files in zonal buckets are left unfinalized to allow appends.
+        **kwargs : dict
+            Additional arguments passed to GCSFileSystem.
+            Supports retry configuration overrides for Storage Control API:
+            - retry_timeout: Total time to spend retrying (seconds).
+            - retry_initial: Initial delay between retries (seconds).
+            - retry_maximum: Maximum delay between retries (seconds).
+            - retry_multiplier: Multiplier for delay between retries.
+            These map to `google.api_core.retry.AsyncRetry` arguments (without 'retry_' prefix).
+        """
+        valid_keys = DEFAULT_RETRY_CONFIG.keys()
         self.retry_config = {
-            k: v for k, v in kwargs.items() if k.startswith("retry_") and v is not None
+            k[6:]: v
+            for k, v in kwargs.items()
+            if k.startswith("retry_") and k[6:] in valid_keys and v is not None
         }
         super().__init__(*args, **kwargs)
         # By default, files in zonal buckets are left unfinalized to allow appends.

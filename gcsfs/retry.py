@@ -11,17 +11,11 @@ from google.api_core import exceptions as api_exceptions
 from google.api_core.retry import AsyncRetry
 
 logger = logging.getLogger("gcsfs")
-
-DEFAULT_RETRY_TIMEOUT = 60.0
-DEFAULT_RETRY_INITIAL = 1.0
-DEFAULT_RETRY_MAXIMUM = 60.0
-DEFAULT_RETRY_MULTIPLIER = 2.0
-
 DEFAULT_RETRY_CONFIG = {
-    "retry_timeout": DEFAULT_RETRY_TIMEOUT,
-    "retry_initial": DEFAULT_RETRY_INITIAL,
-    "retry_maximum": DEFAULT_RETRY_MAXIMUM,
-    "retry_multiplier": DEFAULT_RETRY_MULTIPLIER,
+    "timeout": 60.0,
+    "initial": 1.0,
+    "maximum": 60.0,
+    "multiplier": 2.0,
 }
 
 
@@ -217,25 +211,18 @@ def get_storage_control_retry_config(base_config=None, **kwargs) -> AsyncRetry:
     """
     Returns an AsyncRetry object configured for Storage Control API calls.
 
-    Priority: kwargs (retry_timeout, etc.) > base_config > package defaults.
+    Priority: kwargs (timeout, etc.) > base_config > package defaults.
 
     Args:
         base_config: A dict containing base settings.
-        **kwargs: Direct call-site overrides (e.g., retry_timeout=10).
+        **kwargs: Direct call-site overrides (e.g., timeout=10).
     """
     retry_kwargs = DEFAULT_RETRY_CONFIG.copy()
     if base_config:
         retry_kwargs.update(base_config)
 
-    overrides = {
-        k: v for k, v in kwargs.items() if k.startswith("retry_") and v is not None
-    }
+    valid_keys = DEFAULT_RETRY_CONFIG.keys()
+    overrides = {k: v for k, v in kwargs.items() if k in valid_keys and v is not None}
     retry_kwargs.update(overrides)
 
-    return AsyncRetry(
-        predicate=_is_transient_exception,
-        initial=retry_kwargs["retry_initial"],
-        maximum=retry_kwargs["retry_maximum"],
-        multiplier=retry_kwargs["retry_multiplier"],
-        timeout=retry_kwargs["retry_timeout"],
-    )
+    return AsyncRetry(predicate=_is_transient_exception, **retry_kwargs)
