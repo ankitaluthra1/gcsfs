@@ -218,10 +218,12 @@ def get_storage_control_retry_config(base_config=None, **kwargs) -> AsyncRetry:
         **kwargs: Direct call-site overrides (e.g., timeout=10).
     """
     retry_kwargs = DEFAULT_RETRY_CONFIG.copy()
-    if base_config:
-        retry_kwargs.update(base_config)
-
     valid_keys = DEFAULT_RETRY_CONFIG.keys()
+    if base_config:
+        retry_kwargs.update(
+            {k: v for k, v in base_config.items() if k in valid_keys and v is not None}
+        )
+
     overrides = {k: v for k, v in kwargs.items() if k in valid_keys and v is not None}
     retry_kwargs.update(overrides)
 
