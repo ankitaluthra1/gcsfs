@@ -26,13 +26,13 @@ from google.cloud.storage.asyncio.async_multi_range_downloader import (
 from gcsfs import __version__ as version
 from gcsfs import zb_hns_utils
 from gcsfs.core import GCSFile, GCSFileSystem
+from gcsfs.retry import DEFAULT_RETRY_CONFIG, get_storage_control_retry_config
 from gcsfs.zb_hns_utils import (
     DirectMemmoveBuffer,
     MRDPool,
     PyBytes_AsString,
     PyBytes_FromStringAndSize,
 )
-from gcsfs.retry import DEFAULT_RETRY_CONFIG, get_storage_control_retry_config
 from gcsfs.zonal_file import ZonalFile
 
 logger = logging.getLogger("gcsfs")
