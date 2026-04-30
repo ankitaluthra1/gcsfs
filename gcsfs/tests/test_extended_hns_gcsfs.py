@@ -474,6 +474,34 @@ class TestExtendedGcsFileSystemMv:
             mocks["control_client"].rename_folder.assert_not_called()
             mocks["super_mv"].assert_not_called()
 
+    def test_mv_list_fallback_to_super_mv(self, gcs_hns, gcs_hns_mocks):
+        """Test that mv falls back to super_mv if path1 or path2 is a list."""
+        gcsfs = gcs_hns
+        path1 = [f"{TEST_HNS_BUCKET}/file1.txt", f"{TEST_HNS_BUCKET}/file2.txt"]
+        path2 = f"{TEST_HNS_BUCKET}/new_dir/"
+
+        with gcs_hns_mocks(BucketType.HIERARCHICAL, gcsfs) as mocks:
+            gcsfs.mv(path1, path2)
+
+            mocks["async_lookup_bucket_type"].assert_not_called()
+            mocks["info"].assert_not_called()
+            mocks["control_client"].rename_folder.assert_not_called()
+            mocks["super_mv"].assert_called_once_with(path1, path2)
+
+    def test_mv_glob_fallback_to_super_mv(self, gcs_hns, gcs_hns_mocks):
+        """Test that mv falls back to super_mv if path1 contains glob magic characters."""
+        gcsfs = gcs_hns
+        path1 = f"{TEST_HNS_BUCKET}/*.txt"
+        path2 = f"{TEST_HNS_BUCKET}/new_dir/"
+
+        with gcs_hns_mocks(BucketType.HIERARCHICAL, gcsfs) as mocks:
+            gcsfs.mv(path1, path2)
+
+            mocks["async_lookup_bucket_type"].assert_not_called()
+            mocks["info"].assert_not_called()
+            mocks["control_client"].rename_folder.assert_not_called()
+            mocks["super_mv"].assert_called_once_with(path1, path2)
+
     def test_hns_rename_fails_if_parent_dne(self, gcs_hns, gcs_hns_mocks):
         """Test that HNS rename fails if the destination's parent does not exist."""
         gcsfs = gcs_hns
@@ -2061,3 +2089,35 @@ class TestExtendedGcsFileSystemRm:
             mocks["control_client"].delete_folder.assert_called_once_with(
                 request=expected_request
             )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "requester_pays, expected_quota_project",
+    [
+        ("my-user-project", "my-user-project"),
+        (True, "my-project"),
+    ],
+)
+async def test_get_control_plane_client_quota_project_id(
+    requester_pays, expected_quota_project
+):
+
+    fs = ExtendedGcsFileSystem(project="my-project", requester_pays=requester_pays)
+
+    mock_transport_cls = mock.Mock()
+    mock_channel = mock.Mock()
+    mock_transport_cls.create_channel.return_value = mock_channel
+
+    with mock.patch.object(
+        storage_control_v2.StorageControlAsyncClient,
+        "get_transport_class",
+        return_value=mock_transport_cls,
+    ) as mock_get_transport:
+
+        await fs._get_control_plane_client()
+
+        mock_get_transport.assert_called_once_with("grpc_asyncio")
+        mock_transport_cls.create_channel.assert_called_once()
+        kwargs = mock_transport_cls.create_channel.call_args.kwargs
+        assert kwargs["quota_project_id"] == expected_quota_project

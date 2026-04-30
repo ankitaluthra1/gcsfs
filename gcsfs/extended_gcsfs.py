@@ -110,6 +110,17 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         weakref.finalize(self, self._memmove_executor.shutdown)
 
     @property
+    def _user_project(self):
+        """Value used for billing - enabling "requestor pays" access"""
+        if self.requester_pays:
+            return (
+                self.requester_pays
+                if isinstance(self.requester_pays, str)
+                else self.project
+            )
+        return None
+
+    @property
     def grpc_client(self):
         if self.asynchronous and self._grpc_client is None:
             raise RuntimeError(
@@ -121,11 +132,11 @@ class ExtendedGcsFileSystem(GCSFileSystem):
 
     async def _get_grpc_client(self):
         if self._grpc_client is None:
-            client_options = None
+            client_options = ClientOptions(quota_project_id=self._user_project)
             if self._location:
                 # client_options expects only the host:port, without the protocol.
                 endpoint = self._location.split("://")[-1]
-                client_options = ClientOptions(api_endpoint=endpoint)
+                client_options.api_endpoint = endpoint
             self._grpc_client = AsyncGrpcClient(
                 credentials=self.credential,
                 client_info=ClientInfo(user_agent=f"{USER_AGENT}/{version}"),
@@ -146,6 +157,7 @@ class ExtendedGcsFileSystem(GCSFileSystem):
             channel = transport_cls.create_channel(
                 credentials=self.credential,
                 options=[("grpc.primary_user_agent", f"{USER_AGENT}/{version}")],
+                quota_project_id=self._user_project,
             )
             transport = transport_cls(channel=channel)
             self._storage_control_client = storage_control_v2.StorageControlAsyncClient(
@@ -181,11 +193,14 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 return BucketType.HIERARCHICAL
             return BucketType.NON_HIERARCHICAL
         except api_exceptions.NotFound:
-            logger.warning(f"Error: Bucket {bucket} not found or you lack permissions.")
+            logger.warning(
+                f"Error: Bucket {bucket} not found or you lack permissions for "
+                f"storage layout api used to detect bucket type. Falling back to GCSFileSystem."
+            )
             return BucketType.UNKNOWN
         except Exception as e:
-            logger.error(
-                f"Could not determine bucket type for bucket name {bucket}: {e}"
+            logger.warning(
+                f"Could not determine bucket type for bucket name {bucket}: {e}, falling back to GCSFileSystem"
             )
             # Default to UNKNOWN in case bucket type is not obtained
             return BucketType.UNKNOWN
@@ -603,6 +618,13 @@ class ExtendedGcsFileSystem(GCSFileSystem):
                 self,
             )
             return
+
+        if (
+            isinstance(path1, list)
+            or isinstance(path2, list)
+            or (isinstance(path1, str) and has_magic(path1))
+        ):
+            return await super()._mv(path1, path2, **kwargs)
 
         bucket1, key1, _ = self.split_path(path1)
         bucket2, key2, _ = self.split_path(path2)
