@@ -6,7 +6,6 @@ substitutions:
   _BENCHMARK_CONFIG: ""
   # Format: "hns regional zonal"
   _BUCKET_TYPES: ""
-  _RESULTS_BUCKET: ""
   # Target benchmark workload (e.g., "IO" or "METADATA")
   _BENCHMARK_TYPE: ""
   _IO_VM_TYPE: "c4-standard-192"
@@ -52,7 +51,7 @@ steps:
         echo "export REGIONAL_BUCKET=${_INFRA_PREFIX}-regional-$${SHORT_BUILD_ID}" >> /workspace/build_vars.env
         echo "export ZONAL_BUCKET=${_INFRA_PREFIX}-zonal-$${SHORT_BUILD_ID}" >> /workspace/build_vars.env
         echo "export HNS_BUCKET=${_INFRA_PREFIX}-hns-$${SHORT_BUILD_ID}" >> /workspace/build_vars.env
-        echo "export RESULTS_BUCKET=${_RESULTS_BUCKET}" >> /workspace/build_vars.env
+        echo "export RESULTS_BUCKET=${_INFRA_PREFIX}-run-results" >> /workspace/build_vars.env
         echo "export VM_NAME='${_INFRA_PREFIX}-vm-$${SHORT_BUILD_ID}'" >> /workspace/build_vars.env
     waitFor: ["-"]
 
