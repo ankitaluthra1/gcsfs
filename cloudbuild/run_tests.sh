@@ -151,6 +151,19 @@ case "$TEST_SUITE" in
       "--deselect=gcsfs/tests/test_core.py::test_requester_pays_fails_without_user_project"
     )
 
+    # The prefetcher engine is not integrated for zonal in this bucket.
+    # It will be integrated in a separate PR, after which this will be removed.
+    ZONAL_DESELECTS+=(
+      "--deselect=gcsfs/tests/test_core.py::test_cat_file_routing_and_thresholds"
+      "--deselect=gcsfs/tests/test_core.py::test_cat_file_concurrent_data_integrity"
+      "--deselect=gcsfs/tests/test_core.py::test_cat_file_concurrent_exception_cancellation"
+      "--deselect=gcsfs/tests/test_core.py::test_gcsfile_prefetch_disabled_fallback"
+      "--deselect=gcsfs/tests/test_core.py::test_gcsfile_prefetch_sequential_integrity"
+      "--deselect=gcsfs/tests/test_core.py::test_gcsfile_prefetch_random_seek_integrity"
+      "--deselect=gcsfs/tests/test_core.py::test_gcsfile_multithreaded_read_integrity"
+      "--deselect=gcsfs/tests/test_core.py::test_gcsfile_not_satisfiable_range"
+    )
+
     pytest "${ARGS[@]}" "${ZONAL_DESELECTS[@]}" gcsfs/tests/test_core.py
     ;;
 esac
