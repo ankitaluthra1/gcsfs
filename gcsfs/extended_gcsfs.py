@@ -1152,26 +1152,43 @@ class ExtendedGcsFileSystem(GCSFileSystem):
         Recursively fetches all folder objects under a given path using the
         Storage Control API.
         """
-        folders = []
-        base_path = self.split_path(path)[1].rstrip("/")
-        full_prefix = f"{base_path}/{prefix}".strip("/") if base_path else prefix
+        _, base_path, _ = self.split_path(path)
+        base_path = "" if not base_path else base_path.rstrip("/") + "/"
+        full_prefix = f"{base_path}{prefix}"
 
-        folder_id = full_prefix
-        if folder_id and not folder_id.endswith("/"):
-            folder_id += "/"
+        # To find folders matching a partial prefix, we need to list their parent.
+        if full_prefix and not full_prefix.endswith("/"):
+            start_dir = full_prefix.rpartition("/")[0] + "/"
+        else:
+            start_dir = full_prefix
+
+        folders = []
+        client = await self._get_control_plane_client()
         parent = f"projects/_/buckets/{bucket}"
+
         request = storage_control_v2.ListFoldersRequest(
-            parent=parent, prefix=folder_id, request_id=str(uuid.uuid4())
+            parent=parent, prefix=start_dir, request_id=str(uuid.uuid4())
         )
         logger.debug(f"list_folders request: {request}")
 
-        client = await self._get_control_plane_client()
-        async for folder in await client.list_folders(
-            request=request,
-            retry=self._get_retry_config(),
-            timeout=STORAGE_CONTROL_RPC_TIMEOUT,
-        ):
-            folders.append(self._create_folder_entry(bucket, folder))
+        try:
+            async for folder in await client.list_folders(
+                request=request,
+                retry=self._get_retry_config(),
+                timeout=STORAGE_CONTROL_RPC_TIMEOUT,
+            ):
+                entry = self._create_folder_entry(bucket, folder)
+                _, key, _ = self.split_path(entry["name"])
+                # Key from _create_folder_entry does not have a trailing slash
+                key_with_slash = key + "/"
+
+                if key.startswith(full_prefix) or key_with_slash.startswith(
+                    full_prefix
+                ):
+                    folders.append(entry)
+        except api_exceptions.NotFound:
+            # If the start_dir itself doesn't exist, we just return empty
+            pass
 
         return folders
 
