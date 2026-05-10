@@ -213,16 +213,16 @@ def test_mrd_created_once_for_zonal_file(extended_gcsfs, gcs_bucket_mocks):
         json_data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
     ) as mocks:
         with extended_gcsfs.open(file_path, "rb") as f:
-            # The MRD should be created upon opening the file.
-            mocks["create_mrd"].assert_called_once()
+            # The MRDPoolCache.get should be called upon opening the file.
+            mocks["shared_get"].assert_called_once()
 
             f.read(10)
             f.read(20)
             f.seek(5)
             f.read(5)
 
-        # Verify that create_mrd was not called again.
-        mocks["create_mrd"].assert_called_once()
+        # Verify that shared_get was not called again.
+        mocks["shared_get"].assert_called_once()
 
 
 def test_zonal_file_warning_on_missing_persisted_size(
@@ -231,8 +231,11 @@ def test_zonal_file_warning_on_missing_persisted_size(
     """
     Tests that a warning is logged when MRD has no 'persisted_size' attribute when opening ZonalFile.
     """
-    with gcs_bucket_mocks(json_data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL):
-        # 'persisted_size' is set to None in the mock downloader
+    with gcs_bucket_mocks(
+        json_data, bucket_type_val=BucketType.ZONAL_HIERARCHICAL
+    ) as mocks:
+        # Force persisted_size to None to trigger the warning
+        mocks["pool"].persisted_size = None
         with caplog.at_level(logging.WARNING, logger="gcsfs"):
             with extended_gcsfs.open(file_path, "rb"):
                 pass
@@ -696,3 +699,22 @@ async def test_get_all_folders_start_dir_calculation(
         _, kwargs = mock_client.list_folders.call_args
         request = kwargs["request"]
         assert request.prefix == expected_start_dir
+
+
+def test_extended_gcsfs_constructs_mrd_pool_cache(monkeypatch):
+    from gcsfs.extended_gcsfs import ExtendedGcsFileSystem
+    from gcsfs.zb_hns_utils import MRDPoolCache
+
+    # Avoid creating real gRPC clients
+    monkeypatch.setattr(
+        "gcsfs.extended_gcsfs.ExtendedGcsFileSystem._get_grpc_client",
+        mock.AsyncMock(),
+    )
+
+    fs = ExtendedGcsFileSystem(token="anon", mrd_pool_cache_size=64)
+    assert isinstance(fs._shared_mrd_pool, MRDPoolCache)
+    assert fs._shared_mrd_pool._max_idle_pools == 64
+
+    # Default applies when kwarg omitted
+    fs2 = ExtendedGcsFileSystem(token="anon")
+    assert fs2._shared_mrd_pool._max_idle_pools == 128
