@@ -67,7 +67,11 @@ text_files["multi_threaded_test_file"] = (
     + pattern[: _MULTI_THREADED_TEST_DATA_SIZE % len(pattern)]
 )
 
-allfiles = dict(**files, **csv_files, **text_files)
+allfiles = dict(
+    **files,
+    **csv_files,
+    **{k: v for k, v in text_files.items() if k != "multi_threaded_test_file"},
+)
 a = TEST_BUCKET + "/tmp/test/a"
 b = TEST_BUCKET + "/tmp/test/b"
 c = TEST_BUCKET + "/tmp/test/c"

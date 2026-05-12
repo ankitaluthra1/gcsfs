@@ -1548,6 +1548,8 @@ def test_readline(gcs):
         [files.items(), csv_files.items(), text_files.items()]
     )
     for k, data in all_items:
+        if k == "multi_threaded_test_file":
+            continue
         with gcs.open("/".join([TEST_BUCKET, k]), "rb") as f:
             result = f.readline()
             expected = data.split(b"\n")[0] + (b"\n" if data.count(b"\n") else b"")
@@ -2019,7 +2021,6 @@ def test_find_dircache(gcs):
         f"{TEST_BUCKET}/2014-01-01.csv",
         f"{TEST_BUCKET}/2014-01-02.csv",
         f"{TEST_BUCKET}/2014-01-03.csv",
-        f"{TEST_BUCKET}/multi_threaded_test_file",
         f"{TEST_BUCKET}/zonal",
     }
     assert set(gcs.ls(f"{TEST_BUCKET}/nested")) == {
