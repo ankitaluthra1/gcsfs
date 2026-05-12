@@ -86,6 +86,24 @@ BUCKET_NAME_MAP = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _avoid_adc_timeout(monkeypatch):
+    """Avoid slow ADC lookups and Metadata Server requests in tests."""
+    # Do not apply if tests are explicitly running against real GCS
+    if os.environ.get("STORAGE_EMULATOR_HOST") == "https://storage.googleapis.com":
+        yield
+        return
+
+    # Disable GCE metadata check in google-auth and gcsfs
+    monkeypatch.setenv("NO_GCE_CHECK", "true")
+
+    # Set a dummy project to avoid project ID lookup timeouts if not set
+    if "GOOGLE_CLOUD_PROJECT" not in os.environ:
+        monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "dummy-project")
+
+    yield
+
+
 def stop_docker(container):
     cmd = shlex.split('docker ps -a -q --filter "name=%s"' % container)
     cid = subprocess.check_output(cmd).strip().decode()
@@ -96,6 +114,8 @@ def stop_docker(container):
 @pytest.fixture(scope="session")
 def docker_gcs():
     if "STORAGE_EMULATOR_HOST" in os.environ:
+        if os.environ["STORAGE_EMULATOR_HOST"] != "https://storage.googleapis.com":
+            params["token"] = "anon"
         # assume using real API or otherwise have a server already set up
         yield os.getenv("STORAGE_EMULATOR_HOST")
         return
@@ -495,11 +515,9 @@ def file_path():
 
 
 @pytest_asyncio.fixture
-async def async_gcs():
+async def async_gcs(gcs_factory):
     """Fixture to provide an asynchronous GCSFileSystem instance."""
-    token = "anon" if not os.getenv("STORAGE_EMULATOR_HOST") else None
-    GCSFileSystem.clear_instance_cache()
-    gcs = GCSFileSystem(asynchronous=True, token=token)
+    gcs = gcs_factory(asynchronous=True)
     yield gcs
 
 
