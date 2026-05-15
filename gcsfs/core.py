@@ -2068,6 +2068,48 @@ class GCSFileSystem(asyn.AsyncFileSystem):
 GoogleCredentials.load_tokens()
 
 
+import os
+import time
+import threading
+import logging
+from functools import wraps
+
+def measure_read_throughput(func):
+    """
+    Decorator to measure and log throughput, PID, TID, and timing of a read request.
+    """
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        # Capture pre-read metrics
+        start_time = time.perf_counter()
+        pid = os.getpid()
+        tid = threading.get_ident() # Or threading.get_native_id() for OS-level thread ID
+        
+        # Execute the actual read
+        result = func(self, *args, **kwargs)
+        
+        # Capture post-read metrics
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+        
+        # Calculate size and throughput
+        size_bytes = len(result) if result else 0
+        
+        if elapsed_time > 0:
+            throughput_mb_s = (size_bytes / (1024 * 1024)) / elapsed_time
+        else:
+            throughput_mb_s = 0.0
+            
+        print(
+            f"[PID: {pid} | TID: {tid}] read() on '{self.path}': "
+            f"Fetched {size_bytes} bytes in {elapsed_time:.5f} seconds "
+            f"({throughput_mb_s:.2f} MB/s)."
+        )
+        
+        return result
+    return wrapper
+
+
 class GCSFile(fsspec.spec.AbstractBufferedFile):
     def __init__(
         self,
@@ -2227,6 +2269,14 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
     def url(self):
         """HTTP link to this file's data"""
         return self.fs.url(self.path)
+
+    @measure_read_throughput
+    def read(self, *args, **kwargs):
+        """
+        Reads data from the file, utilizing the parent AbstractBufferedFile logic, 
+        and measures the performance via the decorator.
+        """
+        return super().read(*args, **kwargs)
 
     def _upload_chunk(self, final=False):
         """Write one part of a multi-block file upload
