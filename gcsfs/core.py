@@ -2093,16 +2093,16 @@ def measure_read_throughput(func):
         elapsed_time = end_time - start_time
         
         # Calculate size and throughput
-        size_bytes = len(result) if result else 0
+        size_bytes = len(result)/1024/1024 if result else 0
         
         if elapsed_time > 0:
-            throughput_mb_s = (size_bytes / (1024 * 1024)) / elapsed_time
+            throughput_mb_s = size_bytes / elapsed_time
         else:
             throughput_mb_s = 0.0
             
         print(
-            f"[PID: {pid} | TID: {tid}] read() on '{self.path}': "
-            f"Fetched {size_bytes} bytes in {elapsed_time:.5f} seconds "
+            f"[PID: {pid} | TID: {tid}] read() on '{self.path}' '{self.concurrency}' '{self._prefetch_engine}': "
+            f"Fetched {size_bytes:.2f} bytes in {elapsed_time:.5f} seconds "
             f"({throughput_mb_s:.2f} MB/s)."
         )
         
