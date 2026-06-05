@@ -11,6 +11,7 @@ substitutions:
   _BENCHMARK_TYPE: ""
   _IO_VM_TYPE: "c4-standard-192"
   _METADATA_VM_TYPE: "c4-standard-8"
+  _COMPUTE_RESERVATION_NAME: ""
   _SKIP_IF_FAILED: '[[ -f /workspace/FAILED ]] && echo "Skipping: previous step failed" && exit 0'
 
 steps:
@@ -154,6 +155,14 @@ steps:
         else
           MACHINE_TYPE="${_METADATA_VM_TYPE}"
           EXTRA_ARGS=()
+        fi
+
+        # If a specific reservation name is provided, use it to consume the reservation
+        if [ -n "${_COMPUTE_RESERVATION_NAME}" ]; then
+          EXTRA_ARGS+=(
+            "--reservation-affinity=specific"
+            "--reservation=${_COMPUTE_RESERVATION_NAME}"
+          )
         fi
 
         echo "Creating VM: $${VM_NAME} in zone: ${_ZONE}"
