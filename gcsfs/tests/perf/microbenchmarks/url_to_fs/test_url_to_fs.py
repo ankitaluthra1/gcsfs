@@ -5,12 +5,14 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from fsspec.core import url_to_fs
 
-from gcsfs.tests.perf.microbenchmarks.url_to_fs.configs import get_url_to_fs_benchmark_cases
 from gcsfs.tests.perf.microbenchmarks.runner import (
     filter_test_cases,
     run_multi_process,
     run_multi_threaded,
     run_single_threaded,
+)
+from gcsfs.tests.perf.microbenchmarks.url_to_fs.configs import (
+    get_url_to_fs_benchmark_cases,
 )
 
 BENCHMARK_GROUP = "url_to_fs"

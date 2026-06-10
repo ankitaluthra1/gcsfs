@@ -1,5 +1,7 @@
 from gcsfs.tests.perf.microbenchmarks.configs import BaseBenchmarkConfigurator
-from gcsfs.tests.perf.microbenchmarks.url_to_fs.parameters import UrlToFsBenchmarkParameters
+from gcsfs.tests.perf.microbenchmarks.url_to_fs.parameters import (
+    UrlToFsBenchmarkParameters,
+)
 
 
 class UrlToFsConfigurator(BaseBenchmarkConfigurator):
