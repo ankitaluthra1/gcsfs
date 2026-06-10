@@ -362,20 +362,16 @@ def gcsfs_benchmark_open(extended_gcs_factory, request):
 
 
 @pytest.fixture
-def gcsfs_benchmark_url_to_fs(extended_gcs_factory, request):
+def gcsfs_benchmark_url_to_fs(request):
     """
     A fixture that sets up the environment for a url_to_fs benchmark run.
-    It creates a directory structure with 0-byte files.
+    It generates dummy file paths since url_to_fs performs no I/O.
     """
     params = request.param
-    yield from _benchmark_listing_fixture_helper(
-        extended_gcs_factory,
-        params,
-        "benchmark-url-to-fs",
-        teardown=True,
-        create_folders=True,
-        require_file_paths=True,
-    )
+    prefix = f"{params.bucket_name}/fake_dir"
+    file_paths = [f"{prefix}/file_{i}" for i in range(params.files)]
+
+    yield None, [], file_paths, prefix, params
 
 
 def pytest_benchmark_generate_json(config, benchmarks, machine_info, commit_info):

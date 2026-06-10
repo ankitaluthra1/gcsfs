@@ -91,7 +91,7 @@ def _process_worker(paths, threads, process_durations_shared, index):
     ids=lambda p: p.name,
 )
 def test_url_to_fs_multi_process(
-    benchmark, gcsfs_benchmark_url_to_fs, extended_gcs_factory, request, monitor
+    benchmark, gcsfs_benchmark_url_to_fs, request, monitor
 ):
     gcs, target_dirs, file_paths, prefix, params = gcsfs_benchmark_url_to_fs
 
@@ -109,7 +109,7 @@ def test_url_to_fs_multi_process(
         benchmark,
         monitor,
         params,
-        extended_gcs_factory,
+        lambda **kwargs: None,
         worker_target=_process_worker,
         args_builder=args_builder,
         benchmark_group=BENCHMARK_GROUP,

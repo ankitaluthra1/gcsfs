@@ -9,4 +9,4 @@ class UrlToFsBenchmarkParameters(BaseBenchmarkParameters):
     Parameters for url_to_fs benchmarks.
     """
 
-    folders: int
+    pass
