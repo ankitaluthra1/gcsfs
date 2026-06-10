@@ -20,10 +20,7 @@ BENCHMARK_GROUP = "url_to_fs"
 
 def _url_to_fs_op(path):
     start_time = time.perf_counter()
-    try:
-        url_to_fs(f"gs://{path}")
-    except FileNotFoundError:
-        pass
+    url_to_fs(f"gs://{path}")
     duration_ms = (time.perf_counter() - start_time) * 1000
     logging.debug(f"URL_TO_FS : gs://{path} - {duration_ms:.2f} ms.")
 
@@ -81,7 +78,8 @@ def _process_worker(paths, threads, process_durations_shared, index):
     chunks = _chunk_list(paths, threads)
     with ThreadPoolExecutor(max_workers=threads) as executor:
         futures = [executor.submit(_url_to_fs_ops, chunks[i]) for i in range(threads)]
-        [f.result() for f in futures]
+        for f in futures:
+            f.result()
     duration_s = time.perf_counter() - start_time
     process_durations_shared[index] = duration_s
 
