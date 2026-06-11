@@ -1,0 +1,17 @@
+common:
+  bucket_types:
+    - "regional"
+    - "zonal"
+    - "hns"
+
+scenarios:
+  - name: "url_to_fs_file"
+    files: [1000]
+
+  - name: "url_to_fs_multi_thread_file"
+    files: [1000]
+    threads: [4, 16, 64]
+
+  - name: "url_to_fs_multi_process_file"
+    files: [1000]
+    processes: [4, 16, 64]
