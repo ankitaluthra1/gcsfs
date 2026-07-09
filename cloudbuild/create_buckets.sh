@@ -14,6 +14,12 @@ set -e
 #
 # Note: Variables like $PROJECT_ID, $REGION, $ZONE are passed via 'env' in cloudbuild.yaml
 
+# Initialize gcloud configuration sequentially.
+# This prevents a race condition (SQLite DB locking) where multiple parallel
+# background tasks attempt to initialize ~/.config/gcloud/ simultaneously,
+# which leads to "You do not currently have an active account selected." errors.
+gcloud config list > /dev/null 2>&1 || true
+
 WORKERS_STANDARD="${WORKERS_STANDARD:-1}"
 WORKERS_HNS="${WORKERS_HNS:-1}"
 WORKERS_ZONAL="${WORKERS_ZONAL:-1}"
