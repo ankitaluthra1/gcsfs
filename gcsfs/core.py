@@ -2413,7 +2413,7 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
             from .prefetcher import BackgroundPrefetcher
 
             self._prefetch_engine = BackgroundPrefetcher(
-                self._async_fetch_range,
+                self._make_prefetch_fetcher(),
                 self.size,
                 max_prefetch_size=max_prefetch_size,
                 concurrency=self.concurrency,
@@ -2635,6 +2635,9 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
             concurrency=split_factor,
             cache_type=self.cache_type,
         )
+
+    def _make_prefetch_fetcher(self):
+        return self._async_fetch_range
 
     def close(self):
         super().close()

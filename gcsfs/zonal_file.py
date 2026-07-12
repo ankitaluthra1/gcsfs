@@ -67,6 +67,9 @@ class ZonalFile(GCSFile):
         self.mode = mode
         self.flush_interval_bytes = flush_interval_bytes
         self.gcsfs = gcsfs
+        self._use_interpreter_parallel_prefetch = kwargs.pop(
+            "_use_interpreter_parallel_prefetch", False
+        )
         self.pool_size = pool_size
         object_size = None
         if "r" in self.mode:
@@ -248,6 +251,35 @@ class ZonalFile(GCSFile):
         return await self.gcsfs._concurrent_mrd_fetch(
             start_offset, total_size, split_factor, self.mrd_pool
         )
+
+    def _access_token_provider(self):
+        gcreds = self.gcsfs.credentials
+
+        def _token():
+            gcreds.maybe_refresh()
+            creds = gcreds.credentials
+            if creds is None or not creds.token:
+                raise RuntimeError(
+                    "Interpreter-parallel prefetch needs real credentials "
+                    "(anonymous/emulator token is not supported).")
+            return creds.token
+        return _token
+
+    def _make_prefetch_fetcher(self):
+        from gcsfs.interpreter_prefetch import (
+            InterpreterParallelFetcher,
+            interpreter_prefetch_enabled,
+        )
+        if self._use_interpreter_parallel_prefetch or interpreter_prefetch_enabled():
+            return InterpreterParallelFetcher(
+                bucket = self.bucket,
+                object_name = self.key,
+                generation = self.generation,
+                size = self.size,
+                token_provider = self._access_token_provider(),
+                workers = self.concurrency,
+            )
+        return super()._make_prefetch_fetcher()
 
     def write(self, data):
         """
