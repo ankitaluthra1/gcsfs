@@ -19,7 +19,7 @@ import time
 from gcsfs.interpreter_prefetch import interpreter_prefetch_enabled
 from gcsfs import GCSFileSystem
 
-_CHUNK = 8 * 1024 * 1024
+_CHUNK = 16 * 1024 * 1024
 
 
 def main():
