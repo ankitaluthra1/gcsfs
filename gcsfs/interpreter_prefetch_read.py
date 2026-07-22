@@ -13,6 +13,7 @@ Usage:
     python3.14 gcsfs/tests/perf/interpreter_prefetch_read.py <bucket/object> [concurrency]
 """
 
+import logging
 import sys
 import time
 
@@ -23,6 +24,7 @@ _CHUNK = 16 * 1024 * 1024
 
 
 def main():
+  logging.basicConfig(level=logging.INFO)
   if len(sys.argv) < 2:
     raise SystemExit(
         "usage: interpreter_prefetch_read.py <bucket/object> [concurrency]"

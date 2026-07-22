@@ -2411,9 +2411,34 @@ class GCSFile(fsspec.spec.AbstractBufferedFile):
         if "r" in mode and use_prefetch_reader:
             max_prefetch_size = kwargs.get("max_prefetch_size", MAX_PREFETCH_SIZE)
             from .prefetcher import BackgroundPrefetcher
+            from .interpreter_prefetch import (
+                interpreter_prefetch_enabled,
+                InterpreterParallelFetcher,
+            )
+
+            if interpreter_prefetch_enabled(
+                kwargs.get("use_interpreter_parallel_prefetch")
+            ):
+                def _token_provider():
+                    if self.gcsfs.credentials:
+                        self.gcsfs.credentials.maybe_refresh()
+                        if self.gcsfs.credentials.credentials:
+                            return self.gcsfs.credentials.credentials.token
+                    return ""
+
+                fetcher = InterpreterParallelFetcher(
+                    bucket=self.bucket,
+                    object_name=self.key,
+                    generation=self.generation,
+                    size=self.size,
+                    token_provider=_token_provider,
+                    workers=self.concurrency,
+                )
+            else:
+                fetcher = self._async_fetch_range
 
             self._prefetch_engine = BackgroundPrefetcher(
-                self._async_fetch_range,
+                fetcher,
                 self.size,
                 max_prefetch_size=max_prefetch_size,
                 concurrency=self.concurrency,

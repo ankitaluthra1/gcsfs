@@ -106,7 +106,7 @@ class InterpreterParallelFetcher:
                     scheme,
                 ),
             )
-            logger.debug(
+            logger.info(
                 "InterpreterParallelFetcher: pool of %d worker interpreters for %s/%s",
                 self.workers,
                 self.bucket,

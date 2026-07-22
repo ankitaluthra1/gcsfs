@@ -641,7 +641,7 @@ class BackgroundPrefetcher:
         Raises:
             ValueError: If max_prefetch_size is provided but is not a positive integer.
         """
-        logger.debug(
+        logger.info(
             "Starting BackgroundPrefetcher. Size: %d, Concurrency: %d, Max Prefetch: %s",
             size,
             concurrency,
@@ -831,6 +831,8 @@ class BackgroundPrefetcher:
 
             if self.producer:
                 await self.producer.stop()
+                if hasattr(self.producer.fetcher, "close"):
+                    self.producer.fetcher.close()
 
             self.consumer.clear_buffer()
             logger.debug("BackgroundPrefetcher closed successfully.")
