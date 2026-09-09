@@ -265,3 +265,19 @@ def test_epoch_bounded_run_rejects_steps_a_full_interval_past_the_last_checkpoin
         calculate.validate_required_ray_metrics(**rows)
     assert exc.value.code == 1
     assert "step records end at 6" in capsys.readouterr().err
+
+
+def test_first_batch_time_marginally_above_blocked_is_clamped():
+    # Ray reads these from two separate counters, so float rounding can leave
+    # time_to_first_batch_s a hair above total_blocked_s. That is not a broken
+    # observation and must not cost the run its whole summary. The 1.0s
+    # overshoot in test_ray_data_reducer_rejects_invalid_snapshots is the guard
+    # that this tolerance stays narrow.
+    rows = [
+        ray_data_row(
+            rank=0, split=0, blocked=1.0, total=10.0, setup=1.0 + 1e-9, blocked_calls=1
+        )
+    ]
+    m = calculate.calc_ray_data_metrics(rows)
+    assert m["data_wait_iterator_setup_time"] == 1.0
+    assert m["data_wait_batch_fetch_time"] == 0.0

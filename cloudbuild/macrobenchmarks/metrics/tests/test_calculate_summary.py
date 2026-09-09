@@ -1420,3 +1420,43 @@ def test_main_writes_complete_strict_ray_summary(tmp_path):
         row = next(reader)
     assert row["accelerator_blocked_time"] == "3.0"
     assert row["accelerator_blocked_percent"] == "30.0"
+
+
+def _run_steps_case(tmp_path, *extra_args):
+    in_dir = tmp_path / "raw"
+    _write_step_csv(in_dir)
+    _write_data_loading_csv(in_dir)
+    out_file = tmp_path / "summary.csv"
+    calculate.main(
+        [
+            "--run-id",
+            "r",
+            "--workload-name",
+            "hf-pytorch-lightning-cpu",
+            "--requirements",
+            "gcsfs==1.0",
+            "--in-dir",
+            str(in_dir),
+            "--out-file",
+            str(out_file),
+            "--require-data-loading-metrics",
+            *extra_args,
+        ]
+    )
+    with open(out_file) as f:
+        return list(csv.DictReader(f))[0]
+
+
+def test_main_records_configured_steps_for_a_resume_run(tmp_path):
+    # A resume only emits the steps after the restore point (resuming at 25
+    # toward 100 emits 26..100), so clamping to the observed count would report
+    # the resume offset instead of the configured target the column documents.
+    row = _run_steps_case(tmp_path, "--steps", "100", "--resume-run")
+    assert row["steps"] == "100"
+
+
+def test_main_full_pass_resume_still_records_observed_steps(tmp_path):
+    # An epoch-bounded run has no configured step target to report, resumed or
+    # not, so the observed count remains the only meaningful value.
+    row = _run_steps_case(tmp_path, "--steps", "-1", "--resume-run")
+    assert row["steps"] == "2"

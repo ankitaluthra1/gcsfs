@@ -110,12 +110,12 @@ for each family live in the automation README's schema section.
 
 | Metric family        | What it captures | What it isolates about GCS |
 | :------------------- | :--------------- | :------------------------- |
-| **Step time**        | Mean per-step duration, plus total/average over a "training window" (all steps) and a "stable window" (after warm-up). | End-to-end training throughput, which folds in dataloader stalls. |
+| **Step time**        | Mean per-step duration, plus total/average over a "training window" (all steps) and a "stable window" (after warm-up). The window averages are wall-clock/steps, so unlike `mean_step_time` they include checkpoint time. | End-to-end training throughput, which folds in dataloader stalls. |
 | **Checkpoint write** | Wall-time to persist the full state dict, aggregated across the run (min/avg/percentiles/p100). | Write throughput of large sequential objects to GCS. |
 | **Checkpoint restore** | Wall-time to restore checkpoint state during the initial load. | Read throughput / latency of the restore path. |
 | **Checkpoint delete** | Wall-time to prune old checkpoints when `checkpoints_to_keep` is exceeded. | Delete / object-lifecycle latency. |
 | **Data loading**     | Accelerator-blocked time and percentage -- how long the trainer stalled waiting on the dataloader. | Whether GCS dataset reads keep up with the training loop. |
-| **System / resource** | Per-pod peak/mean CPU cores, memory bytes, and network send/receive rates. | Host-side pressure the IO path generates. |
+| **System / resource** | Per-pod peak/mean CPU cores, memory bytes, and network send/receive rates. Network is *total* pod traffic -- dominated by inter-rank collectives, not GCS. | Host-side pressure the IO path generates. |
 | **Read amplification** | Bytes actually read from GCS vs. logical checkpoint/dataset size (amplification ratio). | Read-efficiency of `gcsfs` -- redundant or over-fetched bytes. |
 
 ## Ray workload layout

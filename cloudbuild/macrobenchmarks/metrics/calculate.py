@@ -254,8 +254,13 @@ def calc_ray_data_metrics(ray_data_iteration_rows: list) -> dict:
         _fail_validation("Ray Data blocked_calls must be a nonnegative integer")
     if total == 0 and blocked != 0:
         _fail_validation("Ray Data blocked time is nonzero for a zero lifetime")
-    if setup > blocked:
+    # Ray reads these two timers from separate counters, so float rounding can
+    # leave setup a hair above blocked. Clamp that away rather than losing the
+    # whole run's summary to it -- the same treatment `percent` gets below. The
+    # tolerance is deliberately narrow: a real overshoot is still fatal.
+    if setup > blocked and not math.isclose(setup, blocked, rel_tol=1e-9, abs_tol=1e-6):
         _fail_validation("Ray Data first-batch time exceeds blocked time")
+    setup = min(setup, blocked)
     percent = 0.0 if total == 0 else 100.0 * blocked / total
     if percent > 100.0 + 1e-9:
         _fail_validation("Ray Data blocked percent exceeds 100")
@@ -288,9 +293,25 @@ def calc_data_wait_metrics(data_wait_rows: list) -> dict:
     undercount when that rank's lines were lost; the headline total cannot.
     """
     by_rank = defaultdict(list)
+    seen = set()
     for r in data_wait_rows:
-        if r.get("global_rank") is not None and r.get("cumulative_total") is not None:
-            by_rank[r["global_rank"]].append(r)
+        if r.get("global_rank") is None or r.get("cumulative_total") is None:
+            continue
+        # Cloud Logging can deliver one record more than once. The headline
+        # total is a max and so is immune, but the split below sums per-span
+        # durations, and a duplicate would push setup+fetch above the total --
+        # which the schema describes as impossible. fetch_index is the emitting
+        # rank's monotonic span counter, so (rank, fetch_index, action) is the
+        # span's identity; keep the first sighting. Rows without a fetch_index
+        # (a raw CSV predating the column) have no identity to dedup on and pass
+        # through, since collapsing them would fold every span of one action
+        # into a single row.
+        if r.get("fetch_index") is not None:
+            key = (r["global_rank"], r["fetch_index"], r.get("action"))
+            if key in seen:
+                continue
+            seen.add(key)
+        by_rank[r["global_rank"]].append(r)
     if not by_rank:
         return {}
     totals = {
@@ -1023,11 +1044,18 @@ def main(argv=None) -> None:
     if all(c is not None for c in components):
         global_batch_size = math.prod(components)
 
-    # max_epochs can end a run before --steps is reached; report what ran.
+    # max_epochs can end a run before --steps is reached; report what ran. A
+    # resume is the exception: it emits only the steps after its restore point
+    # (resuming at 25 toward 100 emits 26..100), so the observed count is the
+    # resume offset rather than the configured target this column documents.
+    # An epoch-bounded run (--steps -1) has no configured target either way, so
+    # it keeps reporting what ran.
     recorded_steps = args.steps
     if step_rows:
         observed_steps = executed_step_count(step_rows)
-        if args.steps is None or args.steps < 0 or observed_steps < args.steps:
+        if args.steps is None or args.steps < 0:
+            recorded_steps = observed_steps
+        elif observed_steps < args.steps and not args.resume_run:
             recorded_steps = observed_steps
 
     dimensions = {

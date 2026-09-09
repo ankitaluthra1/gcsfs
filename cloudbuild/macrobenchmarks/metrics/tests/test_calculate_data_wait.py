@@ -102,3 +102,37 @@ def test_data_wait_roundtrip_through_raw_store(tmp_path):
     assert m["data_wait_iterator_setup_time"] == 1.0
     assert m["data_wait_batch_fetch_time"] == 0.25
     assert m["num_data_wait_spans"] == 2
+
+
+def test_duplicate_span_records_do_not_double_count_the_split():
+    # Cloud Logging can deliver a record more than once. The headline total is a
+    # max of the running total and so is immune, but the split sums per-span
+    # durations -- a duplicate pushes setup+fetch above the total, which the
+    # schema describes as impossible (both are portions of the total).
+    rows = [
+        _row(0, 1, SETUP, 1.0, 1.0),
+        _row(0, 1, SETUP, 1.0, 1.0),
+        _row(0, 2, FETCH, 0.5, 1.5),
+    ]
+    m = calculate.calc_data_wait_metrics(rows)
+    assert m["data_wait_total_time"] == 1.5
+    assert m["data_wait_iterator_setup_time"] == 1.0
+    assert m["data_wait_batch_fetch_time"] == 0.5
+    assert m["num_data_wait_spans"] == 2
+    assert (
+        m["data_wait_iterator_setup_time"] + m["data_wait_batch_fetch_time"]
+        <= m["data_wait_total_time"]
+    )
+
+
+def test_spans_without_a_fetch_index_are_not_collapsed():
+    # fetch_index is the identity key the dedup uses. Rows that lack it (a raw
+    # CSV written before the column existed) must pass through untouched rather
+    # than folding every span of one action into a single row.
+    rows = [
+        _row(0, None, FETCH, 0.5, 0.5),
+        _row(0, None, FETCH, 0.5, 1.0),
+    ]
+    m = calculate.calc_data_wait_metrics(rows)
+    assert m["data_wait_batch_fetch_time"] == 1.0
+    assert m["num_data_wait_spans"] == 2
